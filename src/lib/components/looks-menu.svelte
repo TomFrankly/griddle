@@ -6,6 +6,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import XIcon from '@lucide/svelte/icons/x';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { BUILT_IN_LOOKS, loadLooks, saveLooks, type Look, type NamedLook } from '$lib/looks';
 
 	let { current, onapply }: { current: () => Look; onapply: (look: Look) => void } = $props();
@@ -60,9 +61,10 @@
 <Popover.Root bind:open>
 	<Popover.Trigger>
 		{#snippet child({ props })}
-			<Button {...props} variant="ghost" size="sm" data-testid="looks">
+			<Button {...props} variant="outline" size="sm" data-testid="looks">
 				<PaletteIcon />
-				<span class="hidden sm:inline">Looks</span>
+				Looks
+				<ChevronDownIcon class="opacity-60" />
 			</Button>
 		{/snippet}
 	</Popover.Trigger>

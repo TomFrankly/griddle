@@ -7,13 +7,13 @@
 	const id = $derived(`section-${title.toLowerCase().replace(/\W+/g, '-')}`);
 </script>
 
-<section class="border-b">
-	<label class="flex cursor-pointer items-center justify-between px-4 py-3" for={id}>
-		<span class="text-sm">{title}</span>
+<section class="pane-section-line">
+	<label class="flex cursor-pointer items-center justify-between py-3" for={id}>
+		<span class="pane-title">{title}</span>
 		<Switch {id} bind:checked={on} />
 	</label>
 	{#if on}
-		<div class="space-y-4 px-4 pb-4" transition:slide={{ duration: 150 }}>
+		<div class="space-y-3 pb-4" transition:slide={{ duration: 150 }}>
 			{@render children()}
 		</div>
 	{/if}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { slide } from 'svelte/transition';
-	import { exampleFiles } from '$lib/examples';
+	import { exampleFiles, exampleUrls } from '$lib/examples';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { ModeWatcher, setMode, userPrefersMode } from 'mode-watcher';
@@ -19,6 +19,7 @@
 	import Stepper from '$lib/components/stepper.svelte';
 	import CellOverlay from '$lib/components/cell-overlay.svelte';
 	import ToggleSection from '$lib/components/toggle-section.svelte';
+	import PaneScroll from '$lib/components/pane-scroll.svelte';
 	import LineStyleFields from '$lib/components/line-style-fields.svelte';
 	import BackgroundPicker from '$lib/components/background-picker.svelte';
 	import SliderField from '$lib/components/slider-field.svelte';
@@ -35,6 +36,8 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import InfoDialogs from '$lib/components/info-dialogs.svelte';
+	import StartPanel from '$lib/components/start-panel.svelte';
+	import WelcomeLetter from '$lib/components/welcome-letter.svelte';
 	import ArrowLeftRightIcon from '@lucide/svelte/icons/arrow-left-right';
 	import LocateFixedIcon from '@lucide/svelte/icons/locate-fixed';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
@@ -53,9 +56,6 @@
 	import { captionBands, ensureCaptionFonts, fromPlain, plainText } from '$lib/captions';
 	import TextStyleFields from '$lib/components/text-style-fields.svelte';
 	import LooksMenu from '$lib/components/looks-menu.svelte';
-	import AlignLeftIcon from '@lucide/svelte/icons/align-left';
-	import AlignCenterIcon from '@lucide/svelte/icons/align-center';
-	import AlignRightIcon from '@lucide/svelte/icons/align-right';
 	import { applyLook, scaleStyle, withDefaults, type Look } from '$lib/looks';
 	import { loadBackground, loadFiles, loadSettings, saveBackground, saveSettings, storeFile, syncFiles } from '$lib/persist';
 	import {
@@ -79,7 +79,6 @@
 	} from '$lib/render';
 	import { fillSlots } from '$lib/slots';
 	import SquarePlusIcon from '@lucide/svelte/icons/square-plus';
-	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import { PAINT_PRESETS } from '$lib/paint/presets';
 
 	const ASPECTS = [
@@ -133,7 +132,7 @@
 	let cellImage = $state<Upload | null>(null);
 	// The keyed-out sample photos sit on a green cell background.
 	const SAMPLE_FILL = { on: true, bgId: 'custom', color: '#1ccd50' };
-	let style = $state<CellStyle>({ ...structuredClone(DEFAULT_STYLE), fill: { ...DEFAULT_STYLE.fill, ...SAMPLE_FILL } });
+	let style = $state<CellStyle>(structuredClone(DEFAULT_STYLE));
 	let size = $state('1920');
 	let customSize = $state(3000);
 	let autoLayout = $state(true);
@@ -357,9 +356,51 @@
 		target.addEventListener('pointercancel', up);
 	}
 	let infoOpen = $state<'help' | 'privacy' | null>(null);
+	const WELCOMED = 'griddle:welcomed';
+	let letterOpen = $state(false);
+	$effect(() => {
+		if (!letterOpen) return;
+		try {
+			localStorage.setItem(WELCOMED, '1');
+		} catch {
+			// Without storage the letter may show again next time.
+		}
+	});
+	/** The image last picked in the tray or on the grid; the tray tints it. */
+	let activeId = $state<string | null>(null);
+	let trayEl = $state<HTMLOListElement>();
+	let trayLeft = $state(false);
+	let trayRight = $state(false);
+	function updateTray() {
+		const el = trayEl;
+		if (!el) return;
+		trayLeft = el.scrollLeft > 1;
+		trayRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+	}
+	$effect(() => {
+		const el = trayEl;
+		if (!el) return;
+		const ro = new ResizeObserver(updateTray);
+		ro.observe(el);
+		const mo = new MutationObserver(updateTray);
+		mo.observe(el, { childList: true });
+		updateTray();
+		return () => {
+			ro.disconnect();
+			mo.disconnect();
+		};
+	});
+	/** The tray has no scroll bar, so a plain mouse wheel scrolls it sideways. */
+	function trayWheel(e: WheelEvent) {
+		const el = e.currentTarget as HTMLElement;
+		if (e.ctrlKey || e.metaKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || el.scrollWidth <= el.clientWidth) return;
+		e.preventDefault();
+		el.scrollLeft += e.deltaY;
+	}
 	let paneList = $state<HTMLDivElement>();
 	/** Scrolls the side panel to an image's row, about 30% down, and flashes it. */
 	function revealInPane(id: string) {
+		activeId = id;
 		const pane = paneList;
 		if (dockSide !== 'right' || !pane) return;
 		const row = pane.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`);
@@ -801,9 +842,12 @@
 		showingExamples = false;
 	}
 	/** A grid of empty slots to plan the layout before adding any images. */
-	function startEmpty() {
+	function startEmpty(c = cols, r = rows) {
 		if (showingExamples) clearAll();
-		addSlots(Math.max(1, cols * rows));
+		autoLayout = false;
+		cols = c;
+		rows = r;
+		addSlots(Math.max(1, c * r));
 	}
 	/** Takes the image out of a cell but keeps the cell, with its size and captions. */
 	function clearImage(i: number) {
@@ -1020,6 +1064,47 @@
 		window.addEventListener('pointercancel', cancel);
 	}
 
+	type PaneTab = 'layout' | 'style' | 'export';
+	const PANE_TABS: { id: PaneTab; label: string }[] = [
+		{ id: 'layout', label: 'Layout' },
+		{ id: 'style', label: 'Style' },
+		{ id: 'export', label: 'Export' }
+	];
+	let paneTab = $state<PaneTab>(readPaneTab());
+	function readPaneTab(): PaneTab {
+		try {
+			const t = localStorage.getItem('griddle:tab');
+			return t === 'style' || t === 'export' ? t : 'layout';
+		} catch {
+			return 'layout';
+		}
+	}
+	function showTab(t: PaneTab) {
+		paneTab = t;
+		try {
+			localStorage.setItem('griddle:tab', t);
+		} catch {
+			// Remembering the tab is a convenience.
+		}
+	}
+	/** Arrow keys move between tabs, as in any tab list. */
+	function onTabKey(e: KeyboardEvent) {
+		const i = PANE_TABS.findIndex((t) => t.id === paneTab);
+		const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+		if (!d) return;
+		e.preventDefault();
+		const next = PANE_TABS[(i + d + PANE_TABS.length) % PANE_TABS.length];
+		showTab(next.id);
+		(e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
+	}
+	let exportFormat = $state<ExportFormat | 'psd'>('png');
+	const FORMATS: { id: ExportFormat | 'psd'; label: string }[] = [
+		{ id: 'png', label: 'PNG' },
+		{ id: 'jpeg', label: 'JPG' },
+		{ id: 'webp', label: 'WebP' },
+		{ id: 'psd', label: 'PSD' }
+	];
+
 	let dockSide = $state<'bottom' | 'right'>(readDock());
 	function readDock(): 'bottom' | 'right' {
 		try {
@@ -1194,8 +1279,12 @@
 		} catch {
 			resumed = false;
 		}
-		if (!resumed && !images.length) await addFiles(await exampleFiles(), true);
 		resetHistory();
+		try {
+			letterOpen = !localStorage.getItem(WELCOMED);
+		} catch {
+			letterOpen = false;
+		}
 	});
 
 	$effect(() => {
@@ -1215,6 +1304,7 @@
 <ModeWatcher />
 <Toaster position="bottom-center" />
 <InfoDialogs bind:open={infoOpen} />
+<WelcomeLetter bind:open={letterOpen} />
 
 {#snippet dockHeader()}
 	<div class="flex h-9 items-center gap-1 border-b px-3">
@@ -1245,14 +1335,21 @@
 
 {#snippet imageList(axis: 'x' | 'y')}
 	<ol
-		class={axis === 'x' ? 'flex gap-2 overflow-x-auto p-3' : 'flex flex-col'}
+		bind:this={() => (axis === 'x' ? trayEl : undefined), (el) => axis === 'x' && (trayEl = el)}
+		class={axis === 'x' ? 'tray-scroll flex items-center gap-0.5 overflow-x-auto px-2 py-1.5' : 'flex flex-col'}
 		data-testid="thumbs"
 		ondragover={(e) => onListOver(e, null, axis)}
 		ondrop={onListDrop}
+		onscroll={axis === 'x' ? updateTray : undefined}
+		onwheel={axis === 'x' ? trayWheel : undefined}
 	>
 		{#each images as img, i (img.id)}
+			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 			<li
-				class="group relative shrink-0 {axis === 'x' ? 'size-16 cursor-grab border active:cursor-grabbing' : 'flex gap-3 border-b p-3'} transition-opacity"
+				class="group relative shrink-0 {axis === 'x' ? 'size-[68px] cursor-grab rounded-md p-1 active:cursor-grabbing' : 'flex gap-3 border-b p-3'} transition-[opacity,background-color]"
+				class:bg-accent={axis === 'x' && activeId === img.id}
+				class:tray-hover={axis === 'x' && activeId !== img.id}
+				onclick={axis === 'x' ? () => (activeId = img.id) : undefined}
 				class:opacity-35={i >= layout.used && dragId !== img.id}
 				class:opacity-40={dragId === img.id}
 				data-row={img.id}
@@ -1270,7 +1367,7 @@
 				{#if showInsert && insertAt === i}{@render insertLine(axis, 'start')}{/if}
 				{#if showInsert && insertAt === i + 1 && i === images.length - 1}{@render insertLine(axis, 'end')}{/if}
 				<div
-					class="relative shrink-0 {axis === 'x' ? 'size-full' : 'size-20 cursor-grab border active:cursor-grabbing'}"
+					class="relative shrink-0 overflow-hidden rounded-[3px] {axis === 'x' ? 'size-full' : 'size-20 cursor-grab border active:cursor-grabbing'}"
 					data-drag-handle
 					draggable={axis === 'y' ? 'true' : undefined}
 					title={axis === 'y' ? `${img.name} · drag to reorder` : undefined}
@@ -1289,10 +1386,10 @@
 							<ImagePlusIcon class="size-4" />
 						</button>
 					{/if}
-					<span class="bg-background/90 absolute bottom-0 left-0 px-1 text-[10px] tabular-nums">{i + 1}</span>
+					<span class="pointer-events-none absolute top-1 left-1 min-w-4 rounded-[3px] bg-black/55 px-1 text-center text-[10px] leading-4 font-medium text-white tabular-nums">{i + 1}</span>
 					<button
 						type="button"
-						class="bg-background/90 absolute top-0 right-0 hidden size-5 items-center justify-center group-hover:flex focus-visible:flex"
+						class="bg-background/90 absolute top-1 right-1 hidden size-5 items-center justify-center rounded-[3px] group-hover:flex focus-visible:flex"
 						aria-label={img.file ? `Remove ${img.name}` : `Remove empty slot ${i + 1}`}
 						onclick={() => remove(img.id)}
 					>
@@ -1311,6 +1408,20 @@
 				{/if}
 			</li>
 		{/each}
+		{#if axis === 'x'}
+			<li class="shrink-0 p-1">
+				<button
+					type="button"
+					class="border-input text-muted-foreground hover:bg-muted hover:text-foreground flex size-[60px] items-center justify-center rounded-[3px] border transition-colors"
+					aria-label="Add images"
+					title="Add images"
+					data-testid="tray-add"
+					onclick={() => fileInput.click()}
+				>
+					<PlusIcon class="size-5" />
+				</button>
+			</li>
+		{/if}
 	</ol>
 {/snippet}
 
@@ -1361,12 +1472,10 @@
 				<!-- The script font keeps room for descenders this word lacks; the nudge centers the letters. -->
 				<span class="font-logo translate-y-[0.11em] text-[22px] leading-none italic">Griddle</span>
 			</div>
-			<div class="ml-auto flex items-center gap-1.5">
-				<LooksMenu current={currentLook} onapply={useLook} />
-				<div class="flex items-center">
-					{@render iconAction(`Undo (${mod}Z)`, Undo2Icon, undo, !past.length)}
-					{@render iconAction(isMac ? 'Redo (⇧⌘Z)' : 'Redo (Ctrl+Y)', Redo2Icon, redo, !future.length)}
-				</div>
+			<div class="ml-auto flex items-center gap-1">
+				{@render iconAction(`Undo (${mod}Z)`, Undo2Icon, undo, !past.length)}
+				{@render iconAction(isMac ? 'Redo (⇧⌘Z)' : 'Redo (Ctrl+Y)', Redo2Icon, redo, !future.length)}
+				<span class="bg-border mx-1.5 h-5 w-px" aria-hidden="true"></span>
 				<DropdownMenu.Root>
 					<DropdownMenu.Trigger>
 						{#snippet child({ props })}
@@ -1387,51 +1496,6 @@
 						</DropdownMenu.RadioGroup>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
-				<Button variant="ghost" size="sm" onclick={() => fileInput.click()}>
-					<ImagePlusIcon />
-					<span class="hidden sm:inline">Add images</span>
-				</Button>
-				<Button variant="outline" size="sm" onclick={copy} disabled={!images.length || busy} data-testid="copy">
-					<CopyIcon />
-					<span class="hidden sm:inline">Copy</span>
-				</Button>
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger disabled={!images.length || busy}>
-						{#snippet child({ props })}
-							<Button {...props} size="sm" data-testid="download">
-								{#if busy}<LoaderIcon class="animate-spin" />{:else}<DownloadIcon />{/if}
-								Download
-								<ChevronDownIcon class="opacity-70" />
-							</Button>
-						{/snippet}
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Content align="end" class="w-48">
-						<DropdownMenu.Item onclick={() => download('png')} data-testid="download-png">PNG</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => download('jpeg')} data-testid="download-jpg">JPG</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => download('webp')} data-testid="download-webp">WebP</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => download('psd')} data-testid="download-psd">
-							PSD <span class="text-muted-foreground ml-auto text-xs">layers</span>
-						</DropdownMenu.Item>
-						<DropdownMenu.Sub>
-							<DropdownMenu.SubTrigger data-testid="download-cells-menu">Each cell <span class="text-muted-foreground ml-auto text-xs">ZIP</span></DropdownMenu.SubTrigger>
-							<DropdownMenu.SubContent class="w-48">
-								<DropdownMenu.CheckboxItem bind:checked={cellPick.corners} closeOnSelect={false}>Rounded corners</DropdownMenu.CheckboxItem>
-								<DropdownMenu.CheckboxItem bind:checked={cellPick.shadow} closeOnSelect={false}>Shadow</DropdownMenu.CheckboxItem>
-								<DropdownMenu.CheckboxItem bind:checked={cellPick.captions} closeOnSelect={false}>Captions</DropdownMenu.CheckboxItem>
-								<DropdownMenu.Separator />
-								<DropdownMenu.Item onclick={downloadCells} data-testid="download-cells">Download {filled} PNG{filled === 1 ? '' : 's'}</DropdownMenu.Item>
-							</DropdownMenu.SubContent>
-						</DropdownMenu.Sub>
-						<DropdownMenu.Separator />
-						<div class="space-y-2 px-2 py-2">
-							<div class="flex items-center justify-between text-xs">
-								<span>Quality <span class="text-muted-foreground">· JPG, WebP</span></span>
-								<span class="text-muted-foreground tabular-nums">{quality}%</span>
-							</div>
-							<Slider type="single" bind:value={quality} min={40} max={100} step={1} aria-label="Quality" />
-						</div>
-					</DropdownMenu.Content>
-				</DropdownMenu.Root>
 				<DropdownMenu.Root>
 					<DropdownMenu.Trigger>
 						{#snippet child({ props })}
@@ -1441,6 +1505,7 @@
 						{/snippet}
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content align="end" class="w-40">
+						<DropdownMenu.Item onclick={() => (letterOpen = true)} data-testid="info-welcome">Welcome letter</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => (infoOpen = 'help')} data-testid="info-help">Help</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => (infoOpen = 'privacy')} data-testid="info-privacy">Privacy</DropdownMenu.Item>
 					</DropdownMenu.Content>
@@ -1449,10 +1514,65 @@
 		</header>
 
 		<div class="flex flex-col-reverse md:min-h-0 md:flex-1 md:flex-row">
-			<aside class="shrink-0 border-t md:w-80 md:overflow-y-auto md:border-t-0 md:border-r">
-				<section class="space-y-3 border-b p-4">
+			<aside class="flex shrink-0 flex-col border-t transition-opacity md:min-h-0 md:w-80 md:border-t-0 md:border-r" class:opacity-40={!images.length} inert={!images.length}>
+				<!-- svelte-ignore a11y_interactive_supports_focus -->
+				<div class="flex shrink-0 gap-1 border-b px-3 py-2" role="tablist" aria-label="Settings" tabindex="-1" onkeydown={onTabKey}>
+					{#each PANE_TABS as t (t.id)}
+						<button
+							type="button"
+							role="tab"
+							class="text-muted-foreground hover:bg-muted hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground h-8 flex-1 rounded-md text-sm transition-colors aria-selected:font-medium"
+							aria-selected={paneTab === t.id}
+							tabindex={paneTab === t.id ? 0 : -1}
+							data-tab={t.id}
+							data-testid="tab-{t.id}"
+							onclick={() => showTab(t.id)}>{t.label}</button
+						>
+					{/each}
+				</div>
+				<PaneScroll testid="pane">
+				{#if paneTab === 'layout'}
+				<section class="pane-section space-y-3">
+					<h2 class="pane-title">Canvas</h2>
 					<div class="flex items-center justify-between">
-						<h2 class="text-muted-foreground text-xs font-medium">Grid</h2>
+						<span class="flex items-center gap-1.5 text-sm">
+							Size
+							<InfoTip text="Long edge sizes set the longer side, and the other follows from the grid. Social sizes are fixed, and the grid is fitted inside." />
+						</span>
+						<Select.Root type="single" value={size} onValueChange={pickSize}>
+							<Select.Trigger size="sm" class="w-36" data-testid="size">{sizeLabel}</Select.Trigger>
+							<Select.Content>
+								<Select.Group>
+									<Select.GroupHeading>Long edge</Select.GroupHeading>
+									{#each SIZES as s (s.value)}
+										<Select.Item value={s.value} label={s.label}>{s.label}</Select.Item>
+									{/each}
+								</Select.Group>
+								<Select.Separator />
+								<Select.Group>
+									<Select.GroupHeading>Social</Select.GroupHeading>
+									{#each FRAMES as f (f.value)}
+										<Select.Item value={f.value} label={f.label}>
+											<span class="flex-1">{f.label}</span>
+											<span class="text-muted-foreground text-xs tabular-nums">{f.w}×{f.h}</span>
+										</Select.Item>
+									{/each}
+								</Select.Group>
+							</Select.Content>
+						</Select.Root>
+					</div>
+					{#if size === 'custom'}
+						<SliderField label="Long edge" bind:value={customSize} min={480} max={8000} step={20} />
+					{/if}
+					<div class="text-muted-foreground flex items-center justify-between text-sm tabular-nums" data-testid="dims">
+						<span>{layout.width} × {layout.height} px</span>
+						<span>{layout.used} / {images.length}</span>
+					</div>
+				</section>
+
+				<section class="pane-section space-y-3">
+					<div class="flex items-center justify-between">
+						<h2 class="pane-title">Grid</h2>
 						<Tooltip.Root>
 							<Tooltip.Trigger>
 								{#snippet child({ props })}
@@ -1512,52 +1632,37 @@
 					</div>
 				</section>
 
-				<section class="space-y-4 border-b p-4">
-					<h2 class="text-muted-foreground text-xs font-medium">Spacing</h2>
-					<div class="space-y-2.5">
-						<div class="flex items-center justify-between">
-							<span class="text-sm">Gap</span>
-							<span class="text-muted-foreground text-sm tabular-nums">{gap} px</span>
-						</div>
-						<Slider type="single" bind:value={gap} min={0} max={spaceMax} step={1} aria-label="Gap" />
-					</div>
-					<div class="space-y-2.5">
-						<div class="flex items-center justify-between">
-							<div class="flex items-center gap-1">
-								<span class="text-sm" class:text-muted-foreground={linkPadding}>Edge padding</span>
-								<Tooltip.Root>
-									<Tooltip.Trigger>
-										{#snippet child({ props })}
-											<Toggle
-												{...props}
-												size="sm"
-												class="size-6 min-w-6 p-0"
-												bind:pressed={linkPadding}
-												aria-label="Match edge padding to gap"
-												data-testid="link-padding"
-											>
-												{#if linkPadding}<LinkIcon class="size-3.5" />{:else}<UnlinkIcon class="size-3.5" />{/if}
-											</Toggle>
-										{/snippet}
-									</Tooltip.Trigger>
-									<Tooltip.Content>{linkPadding ? (style.lines.on ? 'Matches the space between images and divider lines. Click to set it separately.' : 'Matches the gap. Click to set it separately.') : 'Match the gap'}</Tooltip.Content>
-								</Tooltip.Root>
-							</div>
-							<span class="text-muted-foreground text-sm tabular-nums">{linkPadding ? linkedPadding : padding} px</span>
-						</div>
-						<Slider
-							type="single"
-							bind:value={padding}
-							min={0}
-							max={spaceMax * 2}
-							step={1}
-							disabled={linkPadding}
-							class={linkPadding ? 'opacity-40' : ''}
-							aria-label="Edge padding"
-						/>
-					</div>
+				<section class="pane-section space-y-2">
+					<h2 class="pane-title">Spacing</h2>
+					<SliderField label="Gap" bind:value={gap} max={spaceMax} reserve />
+					<SliderField label="Edge padding" bind:value={padding} max={spaceMax * 2} disabled={linkPadding} shown={linkPadding ? linkedPadding : undefined}>
+						{#snippet extra()}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									{#snippet child({ props })}
+										<Toggle
+											{...props}
+											size="sm"
+											class="size-6 min-w-6 shrink-0 p-0"
+											bind:pressed={linkPadding}
+											aria-label="Match edge padding to gap"
+											data-testid="link-padding"
+										>
+											{#if linkPadding}<LinkIcon class="size-3.5" />{:else}<UnlinkIcon class="size-3.5" />{/if}
+										</Toggle>
+									{/snippet}
+								</Tooltip.Trigger>
+								<Tooltip.Content>{linkPadding ? (style.lines.on ? 'Matches the space between images and divider lines. Click to set it separately.' : 'Matches the gap. Click to set it separately.') : 'Match the gap'}</Tooltip.Content>
+							</Tooltip.Root>
+						{/snippet}
+					</SliderField>
 				</section>
 
+				{:else if paneTab === 'style'}
+				<section class="pane-section flex items-center justify-between">
+					<h2 class="pane-title">Look</h2>
+					<LooksMenu current={currentLook} onapply={useLook} />
+				</section>
 				<ToggleSection title="Rounded corners" bind:on={style.corners.on}>
 					<SliderField label="Radius" bind:value={style.corners.radius} unit="%" />
 				</ToggleSection>
@@ -1595,20 +1700,6 @@
 						</span>
 						<Button variant="outline" size="sm" onclick={useFileNames} disabled={!images.length}>Use file names</Button>
 					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-sm">Align</span>
-						<ToggleGroup.Root
-							type="single"
-							variant="outline"
-							size="sm"
-							value={style.captions.align}
-							onValueChange={(v) => v && (style.captions.align = v as typeof style.captions.align)}
-						>
-							<ToggleGroup.Item value="left" aria-label="Align left"><AlignLeftIcon /></ToggleGroup.Item>
-							<ToggleGroup.Item value="center" aria-label="Align center"><AlignCenterIcon /></ToggleGroup.Item>
-							<ToggleGroup.Item value="right" aria-label="Align right"><AlignRightIcon /></ToggleGroup.Item>
-						</ToggleGroup.Root>
-					</div>
 					{#if ['top', 'bottom'].includes(style.captions.title.position) || ['top', 'bottom'].includes(style.captions.desc.position)}
 						<div class="space-y-4 border-l pl-3" transition:slide={{ duration: 150 }}>
 							<label class="flex cursor-pointer items-center justify-between" for="caption-fade">
@@ -1638,8 +1729,8 @@
 					<TextStyleFields title="Description" bind:value={style.captions.desc} maxSize={Math.max(60, Math.round(longEdge / 16))} />
 				</ToggleSection>
 
-				<section class="space-y-3 border-b p-4">
-					<h2 class="text-muted-foreground text-xs font-medium">Background</h2>
+				<section class="pane-section space-y-3">
+					<h2 class="pane-title">Background</h2>
 					<BackgroundPicker
 						bind:value={bgId}
 						bind:customColor
@@ -1650,58 +1741,69 @@
 						}}
 					/>
 				</section>
-
-				<section class="space-y-3 p-4">
-					<h2 class="text-muted-foreground text-xs font-medium">Output</h2>
-					<div class="flex items-center justify-between">
-						<span class="flex items-center gap-1.5 text-sm">
-							Size
-							<InfoTip text="Long edge sizes set the longer side, and the other follows from the grid. Social sizes are fixed, and the grid is fitted inside." />
-						</span>
-						<Select.Root type="single" value={size} onValueChange={pickSize}>
-							<Select.Trigger size="sm" class="w-36" data-testid="size">{sizeLabel}</Select.Trigger>
-							<Select.Content>
-								<Select.Group>
-									<Select.GroupHeading>Long edge</Select.GroupHeading>
-									{#each SIZES as s (s.value)}
-										<Select.Item value={s.value} label={s.label}>{s.label}</Select.Item>
-									{/each}
-								</Select.Group>
-								<Select.Separator />
-								<Select.Group>
-									<Select.GroupHeading>Social</Select.GroupHeading>
-									{#each FRAMES as f (f.value)}
-										<Select.Item value={f.value} label={f.label}>
-											<span class="flex-1">{f.label}</span>
-											<span class="text-muted-foreground text-xs tabular-nums">{f.w}×{f.h}</span>
-										</Select.Item>
-									{/each}
-								</Select.Group>
-							</Select.Content>
-						</Select.Root>
+				{:else}
+				<section class="pane-section space-y-3">
+					<div class="flex items-baseline justify-between">
+						<h2 class="pane-title">Image</h2>
+						<span class="text-muted-foreground text-sm tabular-nums">{layout.width} × {layout.height} px</span>
 					</div>
-					{#if size === 'custom'}
-						<div class="space-y-2.5">
-							<div class="flex items-center justify-between">
-								<span class="text-sm">Long edge</span>
-								<span class="text-muted-foreground text-sm tabular-nums">{customSize} px</span>
-							</div>
-							<Slider type="single" bind:value={customSize} min={480} max={8000} step={20} aria-label="Long edge" />
-						</div>
+					<div class="bg-muted flex rounded-md p-0.5" role="radiogroup" aria-label="Format">
+						{#each FORMATS as f (f.id)}
+							<button
+								type="button"
+								role="radio"
+								aria-checked={exportFormat === f.id}
+								class="text-muted-foreground hover:text-foreground aria-checked:bg-background aria-checked:text-foreground h-7 flex-1 rounded-[calc(var(--radius)-1px)] text-sm transition-colors aria-checked:font-medium aria-checked:shadow-sm"
+								data-testid="format-{f.id === 'jpeg' ? 'jpg' : f.id}"
+								onclick={() => (exportFormat = f.id)}>{f.label}</button
+							>
+						{/each}
+					</div>
+					{#if exportFormat === 'jpeg' || exportFormat === 'webp'}
+						<div transition:slide={{ duration: 150 }}><SliderField label="Quality" bind:value={quality} min={40} max={100} unit="%" /></div>
 					{/if}
-					<div class="text-muted-foreground flex items-center justify-between pt-1 text-sm tabular-nums" data-testid="dims">
-						<span>{layout.width} × {layout.height} px</span>
-						<span>{layout.used} / {images.length}</span>
-					</div>
+					{#if exportFormat === 'psd'}
+						<p class="text-muted-foreground text-sm">Each image, caption and line on its own layer.</p>
+					{/if}
+					<Button class="w-full" onclick={() => download(exportFormat)} disabled={!images.length || busy} data-testid="download">
+						{#if busy}<LoaderIcon class="animate-spin" />{:else}<DownloadIcon />{/if}
+						Download {FORMATS.find((f) => f.id === exportFormat)?.label}
+					</Button>
+					<Button variant="outline" class="w-full" onclick={copy} disabled={!images.length || busy} data-testid="copy">
+						<CopyIcon />
+						Copy to clipboard
+					</Button>
 				</section>
+
+				<section class="pane-section space-y-3">
+					<h2 class="pane-title flex items-center gap-1.5">
+						Each cell
+						<InfoTip text="Every image in its cell as its own PNG, zipped together." />
+					</h2>
+					<label class="flex cursor-pointer items-center justify-between text-sm" for="cells-corners">
+						Rounded corners <Switch id="cells-corners" size="sm" bind:checked={cellPick.corners} />
+					</label>
+					<label class="flex cursor-pointer items-center justify-between text-sm" for="cells-shadow">
+						Shadow <Switch id="cells-shadow" size="sm" bind:checked={cellPick.shadow} />
+					</label>
+					<label class="flex cursor-pointer items-center justify-between text-sm" for="cells-captions">
+						Captions <Switch id="cells-captions" size="sm" bind:checked={cellPick.captions} />
+					</label>
+					<Button variant="outline" class="w-full" onclick={downloadCells} disabled={!filled || busy} data-testid="download-cells">
+						<DownloadIcon />
+						Download {filled} PNG{filled === 1 ? '' : 's'} as ZIP
+					</Button>
+				</section>
+				{/if}
+				</PaneScroll>
 			</aside>
 
 			<main class="flex min-w-0 flex-col md:min-h-0 md:flex-1">
 				{#if showingExamples && !welcomeDismissed}
-					<div class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2.5" data-testid="welcome">
+					<div class="flex min-h-[49px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-1.5" data-testid="welcome">
 						<p class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm">
-							<span class="font-medium">Welcome to <span class="font-logo text-lg leading-none italic">Griddle!</span></span>
-							<span class="text-muted-foreground">Drag in images to replace these samples, or start from scratch.</span>
+							<span class="font-medium">This is the sample grid.</span>
+							<span class="text-muted-foreground">Drag in images to replace it, or start from scratch.</span>
 						</p>
 						<div class="flex items-center gap-1">
 							<Button size="sm" variant="outline" onclick={clearAll} data-testid="start-scratch">Start from scratch</Button>
@@ -1712,7 +1814,7 @@
 				<div
 					bind:clientWidth={stageW}
 					bind:clientHeight={stageH}
-					class="bg-accent relative flex h-[62svh] items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
+					class="bg-accent relative flex {images.length ? 'h-[62svh]' : 'h-[calc(100svh-49px)]'} items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
 					{#if images.length}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1845,33 +1947,21 @@
 							{/if}
 						{/if}
 					{:else}
-						<div class="flex flex-col items-center gap-3">
-							<button
-								type="button"
-								class="hover:bg-background/60 flex flex-col items-center gap-3 border px-16 py-14 text-center transition-colors"
-								onclick={() => fileInput.click()}
-							>
-								<ImagePlusIcon class="text-muted-foreground size-6" />
-								<span class="text-sm font-medium">Drop images here</span>
-								<span class="text-muted-foreground text-xs">or click to choose</span>
-							</button>
-							<div class="flex gap-1">
-								<Tooltip.Root>
-									<Tooltip.Trigger>
-										{#snippet child({ props })}
-											<Button {...props} variant="ghost" size="sm" onclick={startEmpty} data-testid="start-empty">
-												<LayoutGridIcon />Start with empty slots
-											</Button>
-										{/snippet}
-									</Tooltip.Trigger>
-									<Tooltip.Content>Lay out a {cols} × {rows} grid first, then drop images into it</Tooltip.Content>
-								</Tooltip.Root>
-								<Button variant="ghost" size="sm" onclick={loadSamples} disabled={loading > 0} data-testid="load-samples">Load samples</Button>
+						<StartPanel
+							{cols}
+							{rows}
+							previews={exampleUrls()}
+							disabled={loading > 0}
+							onchoose={() => fileInput.click()}
+							onempty={startEmpty}
+							onsample={loadSamples}
+						>
+							{#snippet extra()}
 								{#if DEV}
 									<Button variant="ghost" size="sm" onclick={loadPokemon} disabled={loading > 0} data-testid="load-pokemon">Load 25 Pokémon</Button>
 								{/if}
-							</div>
-						</div>
+							{/snippet}
+						</StartPanel>
 					{/if}
 					{#if loading}
 						<div class="bg-background absolute top-3 right-3 flex items-center gap-2 border px-2.5 py-1 text-xs">
@@ -1892,7 +1982,11 @@
 				{#if images.length && dockSide === 'bottom'}
 					<div class="shrink-0 border-t">
 						{@render dockHeader()}
-						{@render imageList('x')}
+						<div class="relative">
+							{@render imageList('x')}
+							<div class="tray-fade from-left" class:on={trayLeft} aria-hidden="true"></div>
+							<div class="tray-fade from-right" class:on={trayRight} aria-hidden="true"></div>
+						</div>
 					</div>
 				{/if}
 			</main>
@@ -1913,6 +2007,35 @@
 </Tooltip.Provider>
 
 <style>
+	.tray-scroll {
+		scrollbar-width: none;
+	}
+	.tray-scroll::-webkit-scrollbar {
+		display: none;
+	}
+	.tray-hover:hover {
+		background: var(--muted);
+	}
+	.tray-fade {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 3rem;
+		pointer-events: none;
+		opacity: 0;
+		transition: opacity 0.2s;
+	}
+	.tray-fade.on {
+		opacity: 1;
+	}
+	.tray-fade.from-left {
+		left: 0;
+		background: linear-gradient(to right, var(--background), transparent);
+	}
+	.tray-fade.from-right {
+		right: 0;
+		background: linear-gradient(to left, var(--background), transparent);
+	}
 	:global(.checker) {
 		background-color: #fff;
 		background-image:
@@ -1931,6 +2054,8 @@
 		aspect-ratio: 1;
 		width: 100%;
 		border: 1px solid var(--border);
+		border-radius: 5px;
+		overflow: hidden;
 		cursor: pointer;
 		outline-offset: 2px;
 	}
@@ -1952,5 +2077,6 @@
 		width: 100%;
 		height: 100%;
 		border: 1px solid rgb(255 255 255 / 70%);
+		border-radius: 3px;
 	}
 </style>

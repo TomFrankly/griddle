@@ -2,7 +2,7 @@
  * Looks: saved spacing, styling and background settings that can be applied to any grid. Pixel
  * values are stored with the output size they were made at and scaled to the current one.
  */
-import { DEFAULT_CAPTIONS } from './captions';
+import { DEFAULT_CAPTIONS, type TextStyle } from './captions';
 import { DEFAULT_STYLE, type CellStyle, type FitMode } from './render';
 
 export type Look = {
@@ -59,6 +59,9 @@ export function applyLook(look: Look, ref: number): Omit<Look, 'ref'> {
 /** Fills in settings added after a look or session was saved. */
 export function withDefaults(s: Partial<CellStyle>): CellStyle {
 	const d = structuredClone(DEFAULT_STYLE);
+	// Alignment used to be one setting for both title and description.
+	const shared = (s.captions as { align?: TextStyle['align'] } | undefined)?.align;
+	const legacy = shared ? { align: shared } : {};
 	return {
 		corners: { ...d.corners, ...s.corners },
 		border: { ...d.border, ...s.border },
@@ -68,8 +71,8 @@ export function withDefaults(s: Partial<CellStyle>): CellStyle {
 		captions: {
 			...d.captions,
 			...s.captions,
-			title: { ...d.captions.title, ...s.captions?.title },
-			desc: { ...d.captions.desc, ...s.captions?.desc }
+			title: { ...d.captions.title, ...legacy, ...s.captions?.title },
+			desc: { ...d.captions.desc, ...legacy, ...s.captions?.desc }
 		}
 	};
 }
