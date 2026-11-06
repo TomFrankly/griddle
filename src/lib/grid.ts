@@ -237,7 +237,7 @@ export function placeImage(
 	cell: Rect,
 	mode: 'fill' | 'fit',
 	adjust: Adjust = DEFAULT_ADJUST,
-	/** Lets an image that exactly fits an axis slide up to half the cell along it, uncovering what's behind. */
+	/** Lets the image move well past the cell's edges, uncovering what's behind it. */
 	free = false
 ): Rect & { slackX: number; slackY: number } {
 	const base = mode === 'fill' ? Math.max(cell.w / imgW, cell.h / imgH) : Math.min(cell.w / imgW, cell.h / imgH);
@@ -247,9 +247,10 @@ export function placeImage(
 	const h = imgH * k;
 	// Positive slack is overflow to pan across; negative slack is free space to move the
 	// image around in when it is smaller than its cell.
-	const loose = (slack: number, size: number) => (free && Math.abs(slack) < 0.5 ? -size : slack);
-	const slackX = loose(w - cell.w, cell.w);
-	const slackY = loose(h - cell.h, cell.h);
+	// Free images can go almost anywhere: the overlap with the cell shrinks to a tenth of the
+	// cell and image sizes combined before they stop.
+	const slackX = free ? -(cell.w + w) * 0.8 : w - cell.w;
+	const slackY = free ? -(cell.h + h) * 0.8 : h - cell.h;
 	const ox = Math.min(1, Math.max(-1, adjust.ox || 0));
 	const oy = Math.min(1, Math.max(-1, adjust.oy || 0));
 	return {

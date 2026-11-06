@@ -204,11 +204,13 @@ describe('zooming out a filled image', () => {
 		const top = placeImage(100, 100, cell, 'fill', { zoom: 0.25, ox: 0, oy: -1 });
 		expect(top.y).toBeCloseTo(0);
 	});
-	it('slides an exactly fitting image when free', () => {
+	it('moves a free image until only a sliver still overlaps the cell', () => {
 		const sq = { x: 0, y: 0, w: 100, h: 100 };
 		expect(placeImage(100, 100, sq, 'fill', { zoom: 1, ox: 1, oy: 0 }).x).toBe(0);
 		const moved = placeImage(100, 100, sq, 'fill', { zoom: 1, ox: 1, oy: -1 }, true);
-		expect(moved.x).toBe(50);
-		expect(moved.y).toBe(-50);
+		expect(moved.x).toBeCloseTo(80);
+		expect(moved.y).toBeCloseTo(-80);
+		const big = placeImage(100, 100, sq, 'fill', { zoom: 2, ox: -1, oy: 0 }, true);
+		expect(big.x + big.w).toBeCloseTo(30);
 	});
 });
