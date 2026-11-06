@@ -21,6 +21,8 @@ export type TextStyle = {
 	/** Space above and below this text, in output pixels. */
 	padTop: number;
 	padBottom: number;
+	/** Space kept clear at the cell's left and right edges, in output pixels. */
+	padSide: number;
 	/** Lines kept before the text is cut off with an ellipsis. */
 	lines: number;
 	shadow: TextShadow;
@@ -29,8 +31,13 @@ export type TextStyle = {
 /** A gradient from the cell's edge behind captions placed inside it. */
 export type CaptionFade = { on: boolean; color: string; opacity: number; length: number };
 
+/** What sits in a cell above its background, listed bottom to top. */
+export type Layer = 'image' | 'fade' | 'text';
+export const DEFAULT_ORDER: Layer[] = ['image', 'fade', 'text'];
+
 export type CaptionStyle = {
 	on: boolean;
+	order: Layer[];
 	align: 'left' | 'center' | 'right';
 	fade: CaptionFade;
 	title: TextStyle;
@@ -41,10 +48,11 @@ const NO_SHADOW: TextShadow = { on: false, strength: 40, distance: 2, softness: 
 
 export const DEFAULT_CAPTIONS: CaptionStyle = {
 	on: false,
+	order: [...DEFAULT_ORDER],
 	align: 'center',
 	fade: { on: false, color: '#000000', opacity: 55, length: 60 },
-	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, lines: 1, shadow: { ...NO_SHADOW } },
-	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, lines: 2, shadow: { ...NO_SHADOW } }
+	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, padSide: 16, lines: 1, shadow: { ...NO_SHADOW } },
+	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, padSide: 16, lines: 2, shadow: { ...NO_SHADOW } }
 };
 
 export const LINE_HEIGHT = 1.3;
@@ -261,25 +269,24 @@ export function drawCaptions(ctx: Ctx, cells: Rect[], texts: (Captioned | null)[
 	cells.forEach((cell, i) => {
 		const t = texts[i];
 		if (!t) return;
+		const inside = (style: TextStyle) => {
+			const side = Math.max(0, Math.min(style.padSide, cell.w / 2 - 1));
+			return { x: cell.x + side, w: Math.max(1, cell.w - side * 2) };
+		};
 		let y = cell.y;
 		for (const { key, style } of parts(c, 'above')) {
 			const h = style.lines * style.size * LINE_HEIGHT;
 			y -= style.padBottom + h;
-			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { x: cell.x, y, w: cell.w, h }, c.align, scale);
+			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, c.align, scale);
 			y -= style.padTop;
 		}
 		y = cell.y + cell.h;
 		for (const { key, style } of parts(c, 'below')) {
 			const h = style.lines * style.size * LINE_HEIGHT;
 			y += style.padTop;
-			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { x: cell.x, y, w: cell.w, h }, c.align, scale);
+			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, c.align, scale);
 			y += h + style.padBottom;
 		}
-		// Inside the cell, text keeps a little distance from the cell's sides.
-		const inside = (style: TextStyle) => {
-			const side = Math.round(style.size * 0.5);
-			return { x: cell.x + side, w: Math.max(1, cell.w - side * 2) };
-		};
 		const bottom = parts(c, 'bottom');
 		for (const [list, start] of [
 			[parts(c, 'top'), cell.y],

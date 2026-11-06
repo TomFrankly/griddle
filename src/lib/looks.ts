@@ -29,6 +29,7 @@ export function scaleStyle(s: CellStyle, k: number): CellStyle {
 		size: r(t.size, k, 4),
 		padTop: r(t.padTop, k),
 		padBottom: r(t.padBottom, k),
+		padSide: r(t.padSide, k),
 		shadow: { ...t.shadow, distance: r(t.shadow.distance, k), softness: r(t.shadow.softness, k) }
 	});
 	return {

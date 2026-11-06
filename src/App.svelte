@@ -32,8 +32,10 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import LocateFixedIcon from '@lucide/svelte/icons/locate-fixed';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
 	import PanelBottomIcon from '@lucide/svelte/icons/panel-bottom';
+	import LayerOrder from '$lib/components/layer-order.svelte';
 	import RichText from '$lib/components/rich-text.svelte';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
@@ -288,17 +290,39 @@
 		spaceHeld = e.type === 'keydown';
 		if (!spaceHeld) panning = false;
 	}
+	// Panning scrolls the stage first; past the scroll range, or when the whole grid fits, it
+	// slides the grid itself, keeping at least KEEP_VISIBLE pixels of it on screen.
+	const KEEP_VISIBLE = 80;
+	let nudge = $state({ x: 0, y: 0 });
 	function startPan(e: PointerEvent) {
 		const el = scroller;
-		if (!el || e.button !== 0) return;
+		if (!el || !previewEl || (e.button !== 0 && e.button !== 1)) return;
 		e.preventDefault();
-		const start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+		const view = el.getBoundingClientRect();
+		const box0 = previewEl.getBoundingClientRect();
+		const start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop, nx: nudge.x, ny: nudge.y };
 		const target = e.currentTarget as HTMLElement;
 		target.setPointerCapture(e.pointerId);
 		panning = true;
+		// One axis: v is the wanted view position (scroll minus nudge).
+		const axis = (d: number, scroll0: number, n0: number, max: number, lo0: number, size: number, vlo: number, vsize: number) => {
+			const want = scroll0 - n0 - d;
+			const scroll = Math.min(max, Math.max(0, want));
+			let n = scroll - want;
+			// Screen position of the grid's leading edge with this scroll and nudge.
+			const lo = lo0 - (scroll - scroll0) + (n - n0);
+			const min = vlo + KEEP_VISIBLE - size;
+			const maxLo = vlo + vsize - KEEP_VISIBLE;
+			if (lo < min) n += min - lo;
+			else if (lo > maxLo) n -= lo - maxLo;
+			return { scroll, n };
+		};
 		const move = (ev: PointerEvent) => {
-			el.scrollLeft = start.left - (ev.clientX - start.x);
-			el.scrollTop = start.top - (ev.clientY - start.y);
+			const h = axis(ev.clientX - start.x, start.left, start.nx, el.scrollWidth - el.clientWidth, box0.left, box0.width, view.left, view.width);
+			const v = axis(ev.clientY - start.y, start.top, start.ny, el.scrollHeight - el.clientHeight, box0.top, box0.height, view.top, view.height);
+			el.scrollLeft = h.scroll;
+			el.scrollTop = v.scroll;
+			nudge = { x: h.n, y: v.n };
 		};
 		const up = () => {
 			panning = false;
@@ -309,6 +333,13 @@
 		target.addEventListener('pointermove', move);
 		target.addEventListener('pointerup', up);
 		target.addEventListener('pointercancel', up);
+	}
+	/** Fits the grid in the stage again and centers it. */
+	async function recenter() {
+		nudge = { x: 0, y: 0 };
+		viewZoom = 1;
+		await tick();
+		if (scroller) scroller.scrollLeft = scroller.scrollTop = 0;
 	}
 
 	/** Mod + scroll (and trackpad pinch, which arrives as Ctrl + scroll) zooms around the pointer. */
@@ -333,12 +364,38 @@
 		})
 	);
 
+	// The preview canvas covers only the part of the grid that is on screen, so zooming in doesn't
+	// make every redraw (such as dragging an image in its cell) paint a huge canvas.
+	let viewRect = $state({ x: 0, y: 0, w: 1, h: 1 });
+	let viewFrame = 0;
+	function updateView() {
+		cancelAnimationFrame(viewFrame);
+		viewFrame = requestAnimationFrame(() => {
+			if (!scroller || !previewEl) return;
+			const s = scroller.getBoundingClientRect();
+			const p = previewEl.getBoundingClientRect();
+			// A little extra around the edges hides the redraw while scrolling.
+			const m = 96;
+			const x0 = Math.max(0, Math.floor(s.left - p.left - m));
+			const y0 = Math.max(0, Math.floor(s.top - p.top - m));
+			const x1 = Math.min(preview.w, Math.ceil(s.right - p.left + m));
+			const y1 = Math.min(preview.h, Math.ceil(s.bottom - p.top + m));
+			const next = { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+			if (next.x !== viewRect.x || next.y !== viewRect.y || next.w !== viewRect.w || next.h !== viewRect.h) viewRect = next;
+		});
+	}
+	$effect(() => {
+		void [preview.w, preview.h, nudge.x, nudge.y, stageW, stageH, images.length > 0, previewEl, scroller];
+		tick().then(updateView);
+	});
+
 	$effect(() => {
 		if (!canvas || images.length === 0) return;
+		const v = viewRect;
 		// Very large zooms draw at a lower density to keep the canvas a reasonable size.
-		const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(24e6 / (preview.w * preview.h)));
-		const w = Math.round(preview.w * dpr);
-		const h = Math.round(preview.h * dpr);
+		const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(16e6 / (v.w * v.h)));
+		const w = Math.round(v.w * dpr);
+		const h = Math.round(v.h * dpr);
 		if (canvas.width !== w) canvas.width = w;
 		if (canvas.height !== h) canvas.height = h;
 		const ctx = canvas.getContext('2d');
@@ -356,7 +413,7 @@
 				const desc = $state.snapshot(img.desc);
 				return { source: img.thumb, width: img.width, height: img.height, adjust, title, desc };
 			},
-			{ background, cellBackground, fit, style: $state.snapshot(style) as CellStyle, scale: w / layout.width }
+			{ background, cellBackground, fit, style: $state.snapshot(style) as CellStyle, scale: (preview.w * dpr) / layout.width, view: { x: v.x * dpr, y: v.y * dpr } }
 		);
 		void fontTick;
 	});
@@ -582,9 +639,14 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
-		if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
 		const t = e.target as HTMLElement | null;
 		if (t?.closest('input, textarea, [contenteditable="true"]')) return;
+		if (e.shiftKey && e.code === 'Digit1' && !(e.metaKey || e.ctrlKey || e.altKey) && images.length) {
+			e.preventDefault();
+			recenter();
+			return;
+		}
+		if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
 		const key = e.key.toLowerCase();
 		if (key === '=' || key === '+') zoomStep(1);
 		else if (key === '-' || key === '_') zoomStep(-1);
@@ -1411,6 +1473,13 @@
 									<SliderField label="Fade length" bind:value={style.captions.fade.length} max={Math.max(200, spaceMax * 2)} />
 								</div>
 							{/if}
+							<div class="space-y-1.5">
+								<span class="flex items-center gap-1.5 text-sm">
+									Layer order
+									<InfoTip text="Top first. Move Text below Image to put a title behind a transparent image." />
+								</span>
+								<LayerOrder bind:value={style.captions.order} fade={style.captions.fade.on} />
+							</div>
 						</div>
 					{/if}
 					<TextStyleFields title="Title" bind:value={style.captions.title} maxSize={Math.max(80, Math.round(longEdge / 12))} />
@@ -1494,10 +1563,34 @@
 					class="bg-accent relative flex h-[62svh] items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
 					{#if images.length}
-						<div bind:this={scroller} use:wheelZoom class="absolute inset-0 overflow-auto" data-testid="stage-scroll">
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							bind:this={scroller}
+							use:wheelZoom
+							class="absolute inset-0 overflow-auto"
+							data-testid="stage-scroll"
+							onscroll={updateView}
+							onpointerdown={(e) => e.button === 1 && startPan(e)}
+							ondblclick={(e) => !(e.target as Element).closest('[data-testid=preview-box]') && recenter()}
+						>
 						<div class="flex min-h-full min-w-full w-max items-center justify-center" style:padding="{preview.pad}px">
-						<div bind:this={previewEl} class="relative shrink-0 shadow-sm" style="width:{preview.w}px;height:{preview.h}px">
-							<canvas bind:this={canvas} class="checker absolute inset-0 size-full" data-testid="preview"></canvas>
+						<div
+							bind:this={previewEl}
+							class="relative shrink-0 shadow-sm"
+							style="width:{preview.w}px;height:{preview.h}px"
+							style:translate="{nudge.x}px {nudge.y}px"
+							data-testid="preview-box"
+						>
+							<div class="checker absolute inset-0"></div>
+							<canvas
+								bind:this={canvas}
+								class="absolute"
+								style:left="{viewRect.x}px"
+								style:top="{viewRect.y}px"
+								style:width="{viewRect.w}px"
+								style:height="{viewRect.h}px"
+								data-testid="preview"
+							></canvas>
 							{#each displayCells as rect, i (images[i]?.id ?? i)}
 								{#if images[i]}
 									<CellOverlay
@@ -1537,15 +1630,32 @@
 								onpointerdown={startPan}
 							></div>
 						{/if}
-						<div class="bg-background/90 absolute right-3 bottom-3 z-20 flex items-center rounded-md border shadow-sm backdrop-blur-sm" data-testid="zoom-controls">
+						<!-- Clicking these keeps focus where it was, so Space still pans right after. -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="bg-background/90 absolute right-3 bottom-3 z-20 flex items-center rounded-md border shadow-sm backdrop-blur-sm"
+							data-testid="zoom-controls"
+							onmousedown={(e) => e.preventDefault()}
+						>
 							<button type="button" class="hover:bg-accent flex size-7 items-center justify-center rounded-l-md disabled:opacity-40" aria-label="Zoom out" title="Zoom out ({mod}−)" disabled={viewZoom <= ZOOM_MIN} onclick={() => zoomStep(-1)}>
 								<MinusIcon class="size-3.5" />
 							</button>
 							<button type="button" class="hover:bg-accent h-7 min-w-12 px-1 text-xs tabular-nums" title="Fit to window ({mod}0)" data-testid="zoom-level" onclick={() => zoomTo(1)}>
 								{viewZoom === 1 ? 'Fit' : `${Math.round(viewZoom * 100)}%`}
 							</button>
-							<button type="button" class="hover:bg-accent flex size-7 items-center justify-center rounded-r-md disabled:opacity-40" aria-label="Zoom in" title="Zoom in ({mod}+)" disabled={viewZoom >= ZOOM_VIEW_MAX} onclick={() => zoomStep(1)}>
+							<button type="button" class="hover:bg-accent flex size-7 items-center justify-center disabled:opacity-40" aria-label="Zoom in" title="Zoom in ({mod}+)" disabled={viewZoom >= ZOOM_VIEW_MAX} onclick={() => zoomStep(1)}>
 								<PlusIcon class="size-3.5" />
+							</button>
+							<button
+								type="button"
+								class="hover:bg-accent flex size-7 items-center justify-center rounded-r-md border-l disabled:opacity-40"
+								aria-label="Recenter"
+								title="Fit and center (Shift+1, or double-click the empty stage)"
+								disabled={viewZoom === 1 && nudge.x === 0 && nudge.y === 0}
+								data-testid="recenter"
+								onclick={recenter}
+							>
+								<LocateFixedIcon class="size-3.5" />
 							</button>
 						</div>
 						{#if lift && images[lift.from]}

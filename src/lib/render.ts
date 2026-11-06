@@ -3,6 +3,8 @@ import { maxPaintSide, paintCanvas } from './paint/paint-gl';
 import type { BackdropPaint } from './paint/presets';
 import {
 	captionInsets,
+	DEFAULT_ORDER,
+	type Layer,
 	hasInside,
 	DEFAULT_CAPTIONS,
 	drawCaptions,
@@ -114,6 +116,12 @@ type Sized = { width: number; height: number; adjust: Adjust };
 export function imageArea(cell: Rect, style: CellStyle): Rect {
 	const pad = style.fill.on ? Math.max(0, Math.min(style.fill.padding, cell.w / 2 - 1, cell.h / 2 - 1)) : 0;
 	return { x: cell.x + pad, y: cell.y + pad, w: Math.max(1, cell.w - 2 * pad), h: Math.max(1, cell.h - 2 * pad) };
+}
+
+/** The order of image, caption fade and text in each cell, bottom to top, always holding all three. */
+export function layerOrder(style: CellStyle): Layer[] {
+	const o = (style.captions.order ?? []).filter((l, i, a) => DEFAULT_ORDER.includes(l) && a.indexOf(l) === i);
+	return o.length === 3 ? o : [...DEFAULT_ORDER];
 }
 
 function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: CellStyle): (PlanItem | null)[] {
@@ -282,22 +290,32 @@ export function drawGrid(
 	ctx: Ctx,
 	layout: Layout,
 	getImage: (index: number) => Drawable | null,
-	opts: RenderOptions & { scale: number }
+	opts: RenderOptions & {
+		scale: number;
+		/** Draws only part of the grid: the canvas shows the window at (x, y), in pixels at this scale. */
+		view?: { x: number; y: number };
+	}
 ) {
 	const { canvas } = ctx;
+	const vx = opts.view?.x ?? 0;
+	const vy = opts.view?.y ?? 0;
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
-	drawBackground(ctx, canvas.width, canvas.height, opts.background);
-	ctx.setTransform(opts.scale, 0, 0, opts.scale, 0, 0);
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.setTransform(1, 0, 0, 1, -vx, -vy);
+	drawBackground(ctx, Math.round(layout.width * opts.scale), Math.round(layout.height * opts.scale), opts.background);
+	ctx.setTransform(opts.scale, 0, 0, opts.scale, -vx, -vy);
 	const imgs = layout.cells.map((_, i) => getImage(i));
 	const items = plan(layout, imgs, opts.fit, opts.style);
 	drawShadows(ctx, items, opts.style, opts.scale);
 	drawFills(ctx, items, opts.style, opts.cellBackground);
 	const inset = borderInset(opts.style, opts.scale);
-	items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
-	drawFades(ctx, items, imgs, opts.style);
+	for (const layer of layerOrder(opts.style)) {
+		if (layer === 'image') items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
+		else if (layer === 'fade') drawFades(ctx, items, imgs, opts.style);
+		else drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
+	}
 	drawBorders(ctx, items, opts.style);
 	drawLines(ctx, layout, opts.style.lines);
-	drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
@@ -359,17 +377,20 @@ export async function renderFull(
 	const items = plan(layout, layout.cells.map((_, i) => images[i] ?? null), opts.fit, opts.style);
 	drawShadows(ctx, items, opts.style, 1);
 	drawFills(ctx, items, opts.style, opts.cellBackground);
-	for (let i = 0; i < items.length; i++) {
-		const it = items[i];
-		if (!it) continue;
-		const bmp = await decode(images[i].file);
-		drawImage(ctx, it, bmp, borderInset(opts.style, 1));
-		bmp.close();
+	for (const layer of layerOrder(opts.style)) {
+		if (layer === 'fade') drawFades(ctx, items, images, opts.style);
+		else if (layer === 'text') drawCaptions(ctx, layout.cells, images, opts.style.captions, 1);
+		else
+			for (let i = 0; i < items.length; i++) {
+				const it = items[i];
+				if (!it) continue;
+				const bmp = await decode(images[i].file);
+				drawImage(ctx, it, bmp, borderInset(opts.style, 1));
+				bmp.close();
+			}
 	}
-	drawFades(ctx, items, images, opts.style);
 	drawBorders(ctx, items, opts.style);
 	drawLines(ctx, layout, opts.style.lines);
-	drawCaptions(ctx, layout.cells, images, opts.style.captions, 1);
 	return canvas;
 }
 
@@ -429,12 +450,10 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 		bmp.close();
 		if (l) imageLayers.push(l);
 	}
-	children.push({ name: 'Images', children: imageLayers, opened: true });
+	const stack: Record<Layer, PsdLayer | null> = { image: { name: 'Images', children: imageLayers, opened: true }, fade: null, text: null };
 
 	if (opts.style.captions.on && opts.style.captions.fade.on)
-		push(layer('Caption fades', full, (ctx) => drawFades(ctx, items, layout.cells.map((_, i) => images[i] ?? null), opts.style)));
-	if (opts.style.border.on && opts.style.border.width > 0) push(layer('Borders', full, (ctx) => drawBorders(ctx, items, opts.style)));
-	if (opts.style.lines.on && opts.style.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, opts.style.lines)));
+		stack.fade = layer('Caption fades', full, (ctx) => drawFades(ctx, items, layout.cells.map((_, i) => images[i] ?? null), opts.style));
 
 	const c = opts.style.captions;
 	if (c.on) {
@@ -447,8 +466,11 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 			const l = layer(`Caption ${i + 1}`, box, (ctx) => drawCaptions(ctx, [cell], [img], c, 1));
 			if (l) captionLayers.push(l);
 		});
-		if (captionLayers.length) children.push({ name: 'Captions', children: captionLayers, opened: true });
+		if (captionLayers.length) stack.text = { name: 'Captions', children: captionLayers, opened: true };
 	}
+	for (const l of layerOrder(opts.style)) push(stack[l]);
+	if (opts.style.border.on && opts.style.border.width > 0) push(layer('Borders', full, (ctx) => drawBorders(ctx, items, opts.style)));
+	if (opts.style.lines.on && opts.style.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, opts.style.lines)));
 
 	// The flattened image, shown by apps that don't read layers.
 	const composite = await renderFull(layout, images, opts);
@@ -498,11 +520,14 @@ export async function renderCells(
 		drawShadows(ctx, [it], style, 1);
 		drawFills(ctx, [it], style, opts.cellBackground);
 		const bmp = await decode(images[i].file);
-		drawImage(ctx, it, bmp, borderInset(style, 1));
+		for (const layer of layerOrder(style)) {
+			if (layer === 'image') drawImage(ctx, it, bmp, borderInset(style, 1));
+			else if (!caps) continue;
+			else if (layer === 'fade') drawFades(ctx, [it], [images[i]], style);
+			else drawCaptions(ctx, [it.cell], [images[i]], style.captions, 1);
+		}
 		bmp.close();
-		if (caps) drawFades(ctx, [it], [images[i]], style);
 		drawBorders(ctx, [it], style);
-		if (caps) drawCaptions(ctx, [it.cell], [images[i]], style.captions, 1);
 		out.push({ index: i, blob: await canvasToBlob(canvas, 'png') });
 	}
 	return out;
