@@ -56,18 +56,17 @@
 	const menuOpen = $derived(spanOpen || textOpen || allOpen);
 	/** Below this size the hover controls don't fit, so they fold into one button. */
 	const compact = $derived(rect.w < 190 || rect.h < 130);
-	let anchor = $state({ x: 0, y: 0 });
-	const virtualAnchor = { getBoundingClientRect: () => new DOMRect(anchor.x, anchor.y, 0, 0) };
+	let root = $state<HTMLElement>();
 	let fileInput = $state<HTMLInputElement>();
 	const hasCaptions = $derived(!!captions?.on && (captions.title.on || captions.desc.on));
 
-	function openAll(x: number, y: number) {
-		anchor = { x, y };
+	/** The menu opens beside the cell so the image stays in view while it's edited. */
+	function openAll() {
 		allOpen = true;
 	}
 	function onContextMenu(e: MouseEvent) {
 		e.preventDefault();
-		openAll(e.clientX, e.clientY);
+		openAll();
 	}
 	/** Drag the folded button to move the image; a click without moving opens the menu. */
 	function onGripDown(e: PointerEvent) {
@@ -75,7 +74,6 @@
 		e.preventDefault();
 		e.stopPropagation();
 		const start = { x: e.clientX, y: e.clientY };
-		const btn = e.currentTarget as HTMLElement;
 		let moved = false;
 		const move = (ev: PointerEvent) => {
 			if (moved || Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 5) return;
@@ -86,8 +84,7 @@
 		const up = () => {
 			done();
 			if (!moved) {
-				const r = btn.getBoundingClientRect();
-				openAll(r.left, r.bottom + 4);
+				openAll();
 			}
 		};
 		const done = () => {
@@ -184,6 +181,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
 <div
+	bind:this={root}
 	class="group/cell absolute touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	class:cursor-grab={movable && !dragging}
 	class:cursor-grabbing={dragging}
@@ -221,7 +219,7 @@
 	<div
 		class="pointer-events-none absolute inset-0 opacity-0 ring-1 ring-white/70 ring-inset transition-opacity group-hover/cell:opacity-100"
 		style:border-radius="{radius}px"
-		class:opacity-100={dragging}
+		class:opacity-100={dragging || allOpen}
 	></div>
 	<input
 		bind:this={fileInput}
@@ -234,7 +232,7 @@
 		}}
 	/>
 	<Popover.Root bind:open={allOpen}>
-		<Popover.Content class="w-64 gap-0 p-0" customAnchor={virtualAnchor} align="start" data-testid="cell-menu">
+		<Popover.Content class="w-64 gap-0 p-0" customAnchor={root} side="right" sideOffset={8} align="start" collisionPadding={8} data-testid="cell-menu">
 			<div class="space-y-3 p-3">
 				<div class="flex items-center justify-between">
 					<span class="text-sm">Across</span>
@@ -293,8 +291,7 @@
 			onkeydown={(e) => {
 				if (e.key !== 'Enter' && e.key !== ' ') return;
 				e.preventDefault();
-				const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-				openAll(r.left, r.bottom + 4);
+				openAll();
 			}}
 		>
 			<GripIcon class="size-3.5" />
