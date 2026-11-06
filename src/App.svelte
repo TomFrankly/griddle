@@ -899,33 +899,42 @@
 	/** Where a dragged thumbnail would go: before the image at this index (length means last). */
 	let insertAt = $state<number | null>(null);
 	// Moving images by dragging them on the grid itself
-	let lift = $state<{ from: number; x: number; y: number; at: number | null } | null>(null);
+	/** `target` is the cell the pointer is nearest; `after` says which side of it the image goes. */
+	let lift = $state<{ from: number; x: number; y: number; target: number | null; after: boolean } | null>(null);
 	let previewEl = $state<HTMLDivElement>();
-	/** The insertion line between cells, in preview pixels. */
+	/** The insertion line beside the target cell, centred in the gap, in preview pixels. */
 	const liftLine = $derived.by(() => {
-		if (!lift || lift.at === null || !displayCells.length) return null;
+		if (!lift || lift.target === null) return null;
+		const c = displayCells[lift.target];
+		if (!c) return null;
 		const g = (gap * k) / 2;
-		const at = lift.at;
-		const before = displayCells[at];
-		const after = displayCells[at - 1];
-		// Between two cells in one row, centre the line in the gap; otherwise put it beside the cell.
-		if (before && (!after || Math.abs(after.y - before.y) > 1)) return { x: before.x - g, y: before.y, h: before.h };
-		if (after) return { x: after.x + after.w + g, y: after.y, h: after.h };
-		return null;
+		return { x: lift.after ? c.x + c.w + g : c.x - g, y: c.y, h: c.h };
 	});
+	/** The cell nearest a point, preferring cells in the same row band, and which side the point is on. */
+	function nearestCell(px: number, py: number): { target: number; after: boolean } | null {
+		let best: { target: number; after: boolean } | null = null;
+		let bestD = Infinity;
+		for (let i = 0; i < displayCells.length; i++) {
+			const c = displayCells[i];
+			if (!images[i]) continue;
+			const dx = Math.max(c.x - px, 0, px - (c.x + c.w));
+			const dy = Math.max(c.y - py, 0, py - (c.y + c.h));
+			// Being level with a cell matters more than being close to it diagonally.
+			const d = dy * 4 + dx;
+			if (d < bestD) {
+				bestD = d;
+				best = { target: i, after: px > c.x + c.w / 2 };
+			}
+		}
+		return best;
+	}
 	function startLift(e: PointerEvent, from: number) {
-		lift = { from, x: e.clientX, y: e.clientY, at: null };
+		lift = { from, x: e.clientX, y: e.clientY, target: null, after: false };
 		const move = (ev: PointerEvent) => {
 			if (!lift || !previewEl) return;
 			const box = previewEl.getBoundingClientRect();
-			const px = ev.clientX - box.left;
-			const py = ev.clientY - box.top;
-			let at = lift.at;
-			displayCells.forEach((c, i) => {
-				if (px >= c.x - gap * k && px <= c.x + c.w + gap * k && py >= c.y && py <= c.y + c.h)
-					at = px < c.x + c.w / 2 ? i : i + 1;
-			});
-			lift = { ...lift, x: ev.clientX, y: ev.clientY, at };
+			const hit = nearestCell(ev.clientX - box.left, ev.clientY - box.top);
+			lift = { ...lift, x: ev.clientX, y: ev.clientY, target: hit?.target ?? null, after: hit?.after ?? false };
 		};
 		const up = () => {
 			window.removeEventListener('pointermove', move);
@@ -933,8 +942,9 @@
 			window.removeEventListener('pointercancel', cancel);
 			const l = lift;
 			lift = null;
-			if (!l || l.at === null) return;
-			const to = l.at > l.from ? l.at - 1 : l.at;
+			if (!l || l.target === null) return;
+			const at = l.after ? l.target + 1 : l.target;
+			const to = at > l.from ? at - 1 : at;
 			if (to === l.from) return;
 			const next = [...images];
 			const [moved] = next.splice(l.from, 1);
