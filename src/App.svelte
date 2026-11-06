@@ -15,17 +15,16 @@
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import InfoTip from '$lib/components/info-tip.svelte';
 	import Stepper from '$lib/components/stepper.svelte';
-	import ColorPicker from '$lib/components/color-picker.svelte';
 	import CellOverlay from '$lib/components/cell-overlay.svelte';
 	import ToggleSection from '$lib/components/toggle-section.svelte';
 	import LineStyleFields from '$lib/components/line-style-fields.svelte';
+	import BackgroundPicker from '$lib/components/background-picker.svelte';
 	import SliderField from '$lib/components/slider-field.svelte';
 	import ColorField from '$lib/components/color-field.svelte';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import ImagePlusIcon from '@lucide/svelte/icons/image-plus';
-	import ImageUpIcon from '@lucide/svelte/icons/image-up';
 	import ShuffleIcon from '@lucide/svelte/icons/shuffle';
 	import ArrowDownAZIcon from '@lucide/svelte/icons/arrow-down-a-z';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -62,8 +61,7 @@
 		type FitMode,
 		type GridImage
 	} from '$lib/render';
-	import { PAINT_PRESETS, type PaintGroup } from '$lib/paint/presets';
-	import { paintThumb } from '$lib/paint/paint-gl';
+	import { PAINT_PRESETS } from '$lib/paint/presets';
 
 	const ASPECTS = [
 		{ value: '1:1', label: 'Square', ratio: 1 },
@@ -100,7 +98,6 @@
 		{ value: 'link', label: 'Link preview', short: 'Link preview', w: 1200, h: 630 }
 	];
 
-	const GROUPS: PaintGroup[] = ['Solid', 'Gradients', 'Patterns'];
 
 	let images = $state<GridImage[]>([]);
 	let cols = $state(3);
@@ -112,7 +109,9 @@
 	let linkPadding = $state(true);
 	let bgId = $state('white');
 	let customColor = $state('#f4f1ea');
-	let bgImage = $state<{ bitmap: ImageBitmap; url: string; name: string; file: File } | null>(null);
+	type Upload = { bitmap: ImageBitmap; url: string; name: string; file: File };
+	let bgImage = $state<Upload | null>(null);
+	let cellImage = $state<Upload | null>(null);
 	let style = $state<CellStyle>(structuredClone(DEFAULT_STYLE));
 	let size = $state('1920');
 	let customSize = $state(3000);
@@ -124,7 +123,6 @@
 	let busy = $state(false);
 	let dragDepth = $state(0);
 	let fileInput: HTMLInputElement;
-	let bgInput: HTMLInputElement;
 	let canvas = $state<HTMLCanvasElement>();
 	let stageW = $state(0);
 	let stageH = $state(0);
@@ -157,16 +155,18 @@
 		if (!toFrame && aspect === 'auto') aspect = '1:1';
 		size = v;
 	}
-	const background = $derived.by((): Background => {
-		if (bgId === 'none') return { kind: 'none' };
-		if (bgId === 'white') return { kind: 'color', color: '#ffffff' };
-		if (bgId === 'black') return { kind: 'color', color: '#000000' };
-		if (bgId === 'custom') return { kind: 'color', color: customColor };
-		if (bgId === 'image' && bgImage) return { kind: 'image', image: bgImage.bitmap };
-		const preset = PAINT_PRESETS.find((p) => `paint:${p.id}` === bgId);
+	function backgroundFor(id: string, custom: string, image: { bitmap: ImageBitmap } | null): Background {
+		if (id === 'none') return { kind: 'none' };
+		if (id === 'white') return { kind: 'color', color: '#ffffff' };
+		if (id === 'black') return { kind: 'color', color: '#000000' };
+		if (id === 'custom') return { kind: 'color', color: custom };
+		if (id === 'image' && image) return { kind: 'image', image: image.bitmap };
+		const preset = PAINT_PRESETS.find((p) => `paint:${p.id}` === id);
 		if (preset) return { kind: 'paint', id: preset.id, paint: preset.paint };
 		return { kind: 'color', color: '#ffffff' };
-	});
+	}
+	const background = $derived(backgroundFor(bgId, customColor, bgImage));
+	const cellBackground = $derived(backgroundFor(style.fill.bgId, style.fill.color, cellImage));
 	const spans = $derived(images.map((i) => ({ w: i.span.w, h: i.span.h })));
 	const grid = $derived(
 		autoLayout && images.length ? autoGrid(spans, ratio || 1, frame ? frame.w / frame.h : 1) : { cols, rows }
@@ -222,6 +222,7 @@
 		linkPadding = v.linkPadding;
 		fit = v.fit;
 		style = v.style;
+		if (style.fill.bgId === 'image' && !cellImage) style.fill.bgId = 'custom';
 		bgId = v.bgId === 'image' && !bgImage ? 'white' : v.bgId;
 		customColor = v.customColor;
 	}
@@ -264,7 +265,7 @@
 				const desc = $state.snapshot(img.desc);
 				return { source: img.thumb, width: img.width, height: img.height, adjust, title, desc };
 			},
-			{ background, fit, style: $state.snapshot(style) as CellStyle, scale: w / layout.width }
+			{ background, cellBackground, fit, style: $state.snapshot(style) as CellStyle, scale: w / layout.width }
 		);
 		void fontTick;
 	});
@@ -359,7 +360,8 @@
 					return img ? [{ id: i.id, file: img.file }] : [];
 				});
 		syncFiles(files);
-		saveBackground(bgImage?.file ?? null);
+		saveBackground(bgImage?.file ?? null, 'canvas');
+		saveBackground(cellImage?.file ?? null, 'cell');
 	}
 
 	/** Brings back the last session: its images if they were your own, and all its settings. */
@@ -368,8 +370,10 @@
 		if (!saved || saved.v !== 1 || !saved.snap) return false;
 		welcomeDismissed = !!saved.welcomeDismissed;
 		const snap = saved.snap;
-		const bg = await loadBackground();
+		const bg = await loadBackground('canvas');
 		if (bg) await setBackgroundImage(bg, false);
+		const cellBg = await loadBackground('cell');
+		if (cellBg) await setCellImage(cellBg, false);
 		if (!snap.showingExamples && !snap.images.length) {
 			// The canvas was cleared on purpose; keep it empty.
 			restore(snap);
@@ -442,6 +446,7 @@
 		bgId = snap.bgId === 'image' && !bgImage ? 'white' : snap.bgId;
 		customColor = snap.customColor;
 		style = withDefaults(structuredClone(snap.style));
+		if (style.fill.bgId === 'image' && !cellImage) style.fill.bgId = 'custom';
 		size = snap.size;
 		customSize = snap.customSize;
 		lastLongEdge = FRAMES.find((f) => f.value === snap.size)
@@ -544,22 +549,43 @@
 		showingExamples = false;
 	}
 
-	async function setBackgroundImage(file: File | undefined, select = true) {
-		if (!file || !file.type.startsWith('image/')) return;
+	async function readUpload(file: File | undefined): Promise<Upload | null> {
+		if (!file || !file.type.startsWith('image/')) return null;
 		try {
 			const bitmap = await downscale(await decode(file), 8192);
-			if (bgImage) {
-				bgImage.bitmap.close();
-				URL.revokeObjectURL(bgImage.url);
-			}
-			bgImage = { bitmap, url: URL.createObjectURL(file), name: file.name, file };
-			if (select) {
-				bgId = 'image';
-				saveBackground(file);
-				persist();
-			}
+			return { bitmap, url: URL.createObjectURL(file), name: file.name, file };
 		} catch {
 			toast.error("That background image couldn't be read");
+			return null;
+		}
+	}
+	const dropUpload = (u: Upload | null) => {
+		if (!u) return;
+		u.bitmap.close();
+		URL.revokeObjectURL(u.url);
+	};
+
+	async function setBackgroundImage(file: File | undefined, select = true) {
+		const u = await readUpload(file);
+		if (!u) return;
+		dropUpload(bgImage);
+		bgImage = u;
+		if (select) {
+			bgId = 'image';
+			saveBackground(u.file, 'canvas');
+			persist();
+		}
+	}
+
+	async function setCellImage(file: File | undefined, select = true) {
+		const u = await readUpload(file);
+		if (!u) return;
+		dropUpload(cellImage);
+		cellImage = u;
+		if (select) {
+			style.fill.bgId = 'image';
+			saveBackground(u.file, 'cell');
+			persist();
 		}
 	}
 
@@ -621,11 +647,11 @@
 		busy = true;
 		try {
 			if (format === 'psd') {
-				const blob = await renderPsd(layout, images, { background, fit, style: $state.snapshot(style) as CellStyle });
+				const blob = await renderPsd(layout, images, { background, cellBackground, fit, style: $state.snapshot(style) as CellStyle });
 				save(blob, fileName('psd'));
 				return;
 			}
-			const full = await renderFull(layout, images, { background, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
+			const full = await renderFull(layout, images, { background, cellBackground, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
 			const blob = await canvasToBlob(full, format, quality / 100);
 			save(blob, fileName(format === 'jpeg' ? 'jpg' : format));
 		} catch (e) {
@@ -644,7 +670,7 @@
 		busy = true;
 		try {
 			// Hand the clipboard a promise so Safari keeps the click's permission while we render.
-			const blob = renderFull(layout, images, { background, fit, style: $state.snapshot(style) }).then((c) => canvasToBlob(c, 'png'));
+			const blob = renderFull(layout, images, { background, cellBackground, fit, style: $state.snapshot(style) }).then((c) => canvasToBlob(c, 'png'));
 			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
 			toast.success('Copied to clipboard');
 		} catch (e) {
@@ -822,37 +848,12 @@
 	});
 
 	const labelOf = (list: { value: string; label: string }[], v: string) => list.find((x) => x.value === v)?.label ?? v;
-	const thumbFor = (id: string) => {
-		const p = PAINT_PRESETS.find((x) => x.id === id);
-		return p ? paintThumb(p.paint, 64, 64) : '';
-	};
 </script>
 
 <svelte:window ondragenter={onDragEnter} ondragleave={onDragLeave} ondragover={onDragOver} ondrop={onDrop} onpaste={onPaste} onkeydown={onKeydown} />
 
 <ModeWatcher />
 <Toaster position="bottom-center" />
-
-{#snippet swatch(id: string, name: string, style: string, extra?: string)}
-	<Tooltip.Root>
-		<Tooltip.Trigger>
-			{#snippet child({ props })}
-				<button
-					{...props}
-					type="button"
-					class="swatch {extra ?? ''}"
-					class:selected={bgId === id}
-					{style}
-					aria-label={name}
-					aria-pressed={bgId === id}
-					data-testid="bg-{id}"
-					onclick={() => (bgId = id)}
-				></button>
-			{/snippet}
-		</Tooltip.Trigger>
-		<Tooltip.Content>{name}</Tooltip.Content>
-	</Tooltip.Root>
-{/snippet}
 
 {#snippet iconAction(label: string, Icon: typeof CopyIcon, fn: () => void, disabled = false)}
 	<Tooltip.Root>
@@ -880,17 +881,7 @@
 			e.currentTarget.value = '';
 		}}
 	/>
-	<input
-		bind:this={bgInput}
-		type="file"
-		accept="image/*"
-		class="hidden"
-		data-testid="bg-input"
-		onchange={(e) => {
-			setBackgroundImage(e.currentTarget.files?.[0]);
-			e.currentTarget.value = '';
-		}}
-	/>
+
 
 	<div class="flex min-h-dvh flex-col md:h-dvh">
 		<header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
@@ -1075,7 +1066,15 @@
 					<SliderField label="Radius" bind:value={style.corners.radius} unit="%" />
 				</ToggleSection>
 				<ToggleSection title="Cell background" bind:on={style.fill.on}>
-					<ColorField label="Color" bind:value={style.fill.color} />
+					<BackgroundPicker
+						bind:value={style.fill.bgId}
+						bind:customColor={style.fill.color}
+						image={cellImage}
+						onimage={(f) => setCellImage(f)}
+						allowNone={false}
+						testid="cell-bg"
+						imageLabel="cell background image"
+					/>
 					<SliderField label="Opacity" bind:value={style.fill.opacity} unit="%" />
 					<SliderField label="Image padding" bind:value={style.fill.padding} max={spaceMax} />
 				</ToggleSection>
@@ -1120,75 +1119,15 @@
 
 				<section class="space-y-3 border-b p-4">
 					<h2 class="text-muted-foreground text-xs font-medium">Background</h2>
-					<div class="swatches">
-						{@render swatch('none', 'Transparent', '', 'checker')}
-						{@render swatch('white', 'White', 'background:#fff')}
-						{@render swatch('black', 'Black', 'background:#000')}
-						<ColorPicker
-							value={customColor}
-							label="Custom color"
-							onpick={(hex) => {
-								customColor = hex;
-								bgId = 'custom';
-							}}
-						>
-							{#snippet trigger(props)}
-								<button
-									{...props}
-									type="button"
-									class="swatch spectrum"
-									class:selected={bgId === 'custom'}
-									aria-label="Custom color"
-									title="Custom color"
-									data-testid="bg-custom"
-									onclick={(e) => {
-										(props.onclick as ((ev: MouseEvent) => void) | undefined)?.(e);
-										bgId = 'custom';
-									}}
-								>
-									<span style:background={customColor}></span>
-								</button>
-							{/snippet}
-						</ColorPicker>
-						<Tooltip.Root>
-							<Tooltip.Trigger>
-								{#snippet child({ props })}
-									<button
-										{...props}
-										type="button"
-										class="swatch grid place-items-center"
-										class:selected={bgId === 'image'}
-										style={bgImage ? `background:center/cover url(${bgImage.url})` : ''}
-										aria-label={bgImage ? `Background image: ${bgImage.name}` : 'Upload a background image'}
-										data-testid="bg-image"
-										onclick={() => (bgImage && bgId !== 'image' ? (bgId = 'image') : bgInput.click())}
-										ondragover={(e) => e.preventDefault()}
-										ondrop={(e) => {
-											e.preventDefault();
-											e.stopPropagation();
-											dragDepth = 0;
-											setBackgroundImage(e.dataTransfer?.files?.[0]);
-										}}
-									>
-										{#if !bgImage}<ImageUpIcon class="text-muted-foreground size-4" />{/if}
-									</button>
-								{/snippet}
-							</Tooltip.Trigger>
-							<Tooltip.Content>
-								{bgImage ? (bgId === 'image' ? 'Replace background image' : 'Background image') : 'Upload or drop a background image'}
-							</Tooltip.Content>
-						</Tooltip.Root>
-					</div>
-					{#each GROUPS as group (group)}
-						<div class="space-y-1.5">
-							<div class="text-muted-foreground text-[11px]">{group}</div>
-							<div class="swatches">
-								{#each PAINT_PRESETS.filter((p) => p.group === group) as p (p.id)}
-									{@render swatch(`paint:${p.id}`, p.name, `background:center/cover url(${thumbFor(p.id)})`)}
-								{/each}
-							</div>
-						</div>
-					{/each}
+					<BackgroundPicker
+						bind:value={bgId}
+						bind:customColor
+						image={bgImage}
+						onimage={(f) => {
+							dragDepth = 0;
+							setBackgroundImage(f);
+						}}
+					/>
 				</section>
 
 				<section class="space-y-3 p-4">
@@ -1405,11 +1344,6 @@
 			0 6px,
 			6px -6px,
 			-6px 0;
-	}
-	.swatches {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
-		gap: 6px;
 	}
 	:global(.swatch) {
 		aspect-ratio: 1;

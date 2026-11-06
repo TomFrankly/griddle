@@ -63,28 +63,30 @@ export async function loadFiles(ids: string[]): Promise<Map<string, File>> {
 
 const stored = new Set<string>();
 
-const BG_KEY = 'bg:image';
+export type BackgroundSlot = 'canvas' | 'cell';
+const BG_KEYS: Record<BackgroundSlot, string> = { canvas: 'bg:image', cell: 'bg:cell' };
+const isBgKey = (k: string) => k.startsWith('bg:');
 
-/** The uploaded background image, if one was stored. */
-export async function loadBackground(): Promise<File | undefined> {
+/** An uploaded background image, if one was stored. */
+export async function loadBackground(slot: BackgroundSlot = 'canvas'): Promise<File | undefined> {
 	try {
-		return (await run<File>('readonly', (s) => s.get(BG_KEY))) ?? undefined;
+		return (await run<File>('readonly', (s) => s.get(BG_KEYS[slot]))) ?? undefined;
 	} catch {
 		return undefined;
 	}
 }
 
-let storedBg: File | null | undefined;
+const storedBg: Partial<Record<BackgroundSlot, File | null>> = {};
 
-/** Stores the background image, or removes it when there is none. */
-export async function saveBackground(file: File | null) {
-	if (file === storedBg) return;
+/** Stores a background image, or removes it when there is none. */
+export async function saveBackground(file: File | null, slot: BackgroundSlot = 'canvas') {
+	if (file === storedBg[slot]) return;
 	try {
 		await run('readwrite', (s) => {
-			if (file) s.put(file, BG_KEY);
-			else s.delete(BG_KEY);
+			if (file) s.put(file, BG_KEYS[slot]);
+			else s.delete(BG_KEYS[slot]);
 		});
-		storedBg = file;
+		storedBg[slot] = file;
 	} catch {
 		// Ignore: storage is a convenience.
 	}
@@ -106,10 +108,10 @@ export async function storeFile(id: string, file: File) {
 export async function syncFiles(files: { id: string; file: File }[]) {
 	try {
 		const keys = ((await run<IDBValidKey[]>('readonly', (s) => s.getAllKeys())) ?? []).map(String);
-		keys.forEach((k) => k !== BG_KEY && stored.add(k));
+		keys.forEach((k) => !isBgKey(k) && stored.add(k));
 		const want = new Set(files.map((f) => f.id));
 		await run('readwrite', (s) => {
-			for (const k of keys) if (!want.has(k) && k !== BG_KEY) s.delete(k);
+			for (const k of keys) if (!want.has(k) && !isBgKey(k)) s.delete(k);
 			for (const f of files) if (!stored.has(f.id)) s.put(f.file, f.id);
 		});
 		stored.clear();

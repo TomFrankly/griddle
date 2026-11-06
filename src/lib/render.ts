@@ -84,7 +84,7 @@ export type CellStyle = {
 	shadow: { on: boolean; strength: number; distance: number; softness: number };
 	lines: LineStyle;
 	/** A box behind each image, filling its cell. Shows through transparent images. */
-	fill: { on: boolean; color: string; opacity: number; padding: number };
+	fill: { on: boolean; bgId: string; color: string; opacity: number; padding: number };
 	captions: CaptionStyle;
 };
 
@@ -93,7 +93,7 @@ export const DEFAULT_STYLE: CellStyle = {
 	border: { on: false, width: 4, color: '#ffffff', opacity: 100 },
 	shadow: { on: false, strength: 35, distance: 8, softness: 24 },
 	lines: DEFAULT_LINES,
-	fill: { on: false, color: '#f0f0f0', opacity: 100, padding: 0 },
+	fill: { on: false, bgId: 'custom', color: '#f0f0f0', opacity: 100, padding: 0 },
 	captions: DEFAULT_CAPTIONS
 };
 
@@ -131,17 +131,37 @@ function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: Cell
 	});
 }
 
-function drawFills(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle) {
+/** Draws a background into a rectangle, in the context's current coordinates. */
+function fillRectWith(ctx: Ctx, r: Rect, bg: Background) {
+	if (bg.kind === 'color') {
+		ctx.fillStyle = bg.color;
+		ctx.fillRect(r.x, r.y, r.w, r.h);
+	} else if (bg.kind === 'paint') {
+		const t = ctx.getTransform();
+		const k = Math.hypot(t.a, t.b) || 1;
+		ctx.drawImage(paintFor(bg.id, bg.paint, Math.max(1, r.w * k), Math.max(1, r.h * k)), r.x, r.y, r.w, r.h);
+	} else if (bg.kind === 'image') {
+		const img = bg.image;
+		const s = Math.max(r.w / img.width, r.h / img.height);
+		ctx.imageSmoothingQuality = 'high';
+		ctx.drawImage(img, r.x + (r.w - img.width * s) / 2, r.y + (r.h - img.height * s) / 2, img.width * s, img.height * s);
+	}
+}
+
+/** The box behind each image, cut to its corners. */
+function drawFills(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle, bg: Background | undefined) {
 	const f = style.fill;
 	if (!f.on || f.opacity <= 0) return;
-	ctx.save();
-	ctx.fillStyle = withAlpha(f.color, f.opacity);
+	const fill = bg ?? { kind: 'color', color: f.color };
 	for (const it of items) {
 		if (!it) continue;
+		ctx.save();
+		ctx.globalAlpha = Math.min(1, f.opacity / 100);
 		shape(ctx, it.visible, it.radius);
-		ctx.fill();
+		ctx.clip();
+		fillRectWith(ctx, it.visible, fill);
+		ctx.restore();
 	}
-	ctx.restore();
 }
 
 function shape(ctx: Ctx, r: Rect, radius: number) {
@@ -214,7 +234,8 @@ function drawBorders(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle) {
 	ctx.restore();
 }
 
-export type RenderOptions = { background: Background; fit: FitMode; style: CellStyle };
+/** `cellBackground` fills the box behind each image when cell backgrounds are on. */
+export type RenderOptions = { background: Background; cellBackground?: Background; fit: FitMode; style: CellStyle };
 
 /** Draws the grid onto a canvas whose size is `layout` × `scale`. */
 export function drawGrid(
@@ -230,7 +251,7 @@ export function drawGrid(
 	const imgs = layout.cells.map((_, i) => getImage(i));
 	const items = plan(layout, imgs, opts.fit, opts.style);
 	drawShadows(ctx, items, opts.style, opts.scale);
-	drawFills(ctx, items, opts.style);
+	drawFills(ctx, items, opts.style, opts.cellBackground);
 	const inset = borderInset(opts.style, opts.scale);
 	items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
 	drawBorders(ctx, items, opts.style);
@@ -296,7 +317,7 @@ export async function renderFull(
 	drawBackground(ctx, layout.width, layout.height, bg);
 	const items = plan(layout, layout.cells.map((_, i) => images[i] ?? null), opts.fit, opts.style);
 	drawShadows(ctx, items, opts.style, 1);
-	drawFills(ctx, items, opts.style);
+	drawFills(ctx, items, opts.style, opts.cellBackground);
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i];
 		if (!it) continue;
@@ -355,7 +376,7 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 	if (opts.background.kind !== 'none') push(layer('Background', full, (ctx) => drawBackground(ctx, W, H, opts.background)));
 	if (opts.style.shadow.on && opts.style.shadow.strength > 0) push(layer('Shadows', full, (ctx) => drawShadows(ctx, items, opts.style, 1)));
 
-	if (opts.style.fill.on && opts.style.fill.opacity > 0) push(layer('Cell backgrounds', full, (ctx) => drawFills(ctx, items, opts.style)));
+	if (opts.style.fill.on && opts.style.fill.opacity > 0) push(layer('Cell backgrounds', full, (ctx) => drawFills(ctx, items, opts.style, opts.cellBackground)));
 
 	const imageLayers: PsdLayer[] = [];
 	for (let i = 0; i < items.length; i++) {
