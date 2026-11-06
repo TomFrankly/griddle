@@ -1102,7 +1102,7 @@
 				<div
 					bind:clientWidth={stageW}
 					bind:clientHeight={stageH}
-					class="bg-muted/40 relative flex h-[62svh] items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
+					class="bg-accent relative flex h-[62svh] items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
 					{#if images.length}
 						<div class="relative shadow-sm" style="width:{preview.w}px;height:{preview.h}px">
