@@ -5,6 +5,7 @@ import {
 	DEFAULT_CAPTIONS,
 	drawCaptions,
 	ensureCaptionFonts,
+	isEmpty,
 	type CaptionStyle,
 	type Captioned,
 	type RichText
@@ -321,4 +322,72 @@ export function canvasToBlob(canvas: HTMLCanvasElement, format: ExportFormat, qu
 			format === 'png' ? undefined : quality
 		)
 	);
+}
+
+/**
+ * Renders the grid as a layered Photoshop file: background, shadows, one layer per image (cut to
+ * its cell, corners included), borders, divider lines and one layer per caption. Everything is
+ * drawn locally; ag-psd only packs the layers.
+ */
+export async function renderPsd(layout: Layout, images: GridImage[], opts: RenderOptions): Promise<Blob> {
+	const { writePsd } = await import('ag-psd');
+	await ensureCaptionFonts(opts.style.captions);
+	const W = layout.width;
+	const H = layout.height;
+	type PsdLayer = { name: string; canvas?: HTMLCanvasElement; left?: number; top?: number; children?: PsdLayer[]; opened?: boolean };
+	const layer = (name: string, box: Rect, draw: (ctx: Ctx) => void): PsdLayer | null => {
+		const left = Math.max(0, Math.floor(box.x));
+		const top = Math.max(0, Math.floor(box.y));
+		const w = Math.min(W, Math.ceil(box.x + box.w)) - left;
+		const h = Math.min(H, Math.ceil(box.y + box.h)) - top;
+		if (w <= 0 || h <= 0) return null;
+		const c = document.createElement('canvas');
+		c.width = w;
+		c.height = h;
+		const ctx = c.getContext('2d');
+		if (!ctx) throw new Error('Canvas is not available in this browser.');
+		ctx.translate(-left, -top);
+		draw(ctx);
+		return { name, canvas: c, left, top };
+	};
+	const full = { x: 0, y: 0, w: W, h: H };
+	const items = plan(layout, layout.cells.map((_, i) => images[i] ?? null), opts.fit, opts.style);
+	const children: PsdLayer[] = [];
+	const push = (l: PsdLayer | null) => l && children.push(l);
+
+	if (opts.background.kind !== 'none') push(layer('Background', full, (ctx) => drawBackground(ctx, W, H, opts.background)));
+	if (opts.style.shadow.on && opts.style.shadow.strength > 0) push(layer('Shadows', full, (ctx) => drawShadows(ctx, items, opts.style, 1)));
+
+	const imageLayers: PsdLayer[] = [];
+	for (let i = 0; i < items.length; i++) {
+		const it = items[i];
+		if (!it) continue;
+		const bmp = await decode(images[i].file);
+		const l = layer(`${i + 1} ${images[i].name}`, it.visible, (ctx) => drawImage(ctx, it, bmp, borderInset(opts.style, 1)));
+		bmp.close();
+		if (l) imageLayers.push(l);
+	}
+	children.push({ name: 'Images', children: imageLayers, opened: true });
+
+	if (opts.style.border.on && opts.style.border.width > 0) push(layer('Borders', full, (ctx) => drawBorders(ctx, items, opts.style)));
+	if (opts.style.lines.on && opts.style.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, opts.style)));
+
+	const c = opts.style.captions;
+	if (c.on) {
+		const captionLayers: PsdLayer[] = [];
+		layout.cells.forEach((cell, i) => {
+			const img = images[i];
+			if (!img || (isEmpty(img.title) && isEmpty(img.desc))) return;
+			const pad = 64;
+			const box = { x: cell.x - pad, y: cell.y - layout.bandAbove - pad, w: cell.w + 2 * pad, h: cell.h + layout.bandAbove + layout.bandBelow + 2 * pad };
+			const l = layer(`Caption ${i + 1}`, box, (ctx) => drawCaptions(ctx, [cell], [img], c, 1));
+			if (l) captionLayers.push(l);
+		});
+		if (captionLayers.length) children.push({ name: 'Captions', children: captionLayers, opened: true });
+	}
+
+	// The flattened image, shown by apps that don't read layers.
+	const composite = await renderFull(layout, images, opts);
+	const buffer = writePsd({ width: W, height: H, canvas: composite, children } as Parameters<typeof writePsd>[0]);
+	return new Blob([buffer], { type: 'image/vnd.adobe.photoshop' });
 }

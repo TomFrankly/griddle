@@ -38,6 +38,7 @@
     "wrangler": "^4.158.0"
   },
   "dependencies": {
+    "ag-psd": "^34.1.0",
     "prosemirror-commands": "^1.7.2",
     "prosemirror-history": "^1.5.1",
     "prosemirror-keymap": "^1.2.3",

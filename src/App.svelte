@@ -53,6 +53,7 @@
 		drawGrid,
 		loadImage,
 		renderFull,
+		renderPsd,
 		DEFAULT_STYLE,
 		type Background,
 		type CellStyle,
@@ -587,20 +588,29 @@
 
 	const fileName = (ext: string) => `griddle-${layout.cols}x${layout.rows}-${layout.width}x${layout.height}.${ext}`;
 
-	async function download(format: ExportFormat) {
+	function save(blob: Blob, name: string) {
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = name;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 10_000);
+	}
+
+	async function download(format: ExportFormat | 'psd') {
 		if (!images.length || busy) return;
 		busy = true;
 		try {
+			if (format === 'psd') {
+				const blob = await renderPsd(layout, images, { background, fit, style: $state.snapshot(style) as CellStyle });
+				save(blob, fileName('psd'));
+				return;
+			}
 			const full = await renderFull(layout, images, { background, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
 			const blob = await canvasToBlob(full, format, quality / 100);
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = fileName(format === 'jpeg' ? 'jpg' : format);
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			setTimeout(() => URL.revokeObjectURL(url), 10_000);
+			save(blob, fileName(format === 'jpeg' ? 'jpg' : format));
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Export failed');
 		} finally {
@@ -881,6 +891,9 @@
 						<DropdownMenu.Item onclick={() => download('png')} data-testid="download-png">PNG</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => download('jpeg')} data-testid="download-jpg">JPG</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => download('webp')} data-testid="download-webp">WebP</DropdownMenu.Item>
+						<DropdownMenu.Item onclick={() => download('psd')} data-testid="download-psd">
+							PSD <span class="text-muted-foreground ml-auto text-xs">layers</span>
+						</DropdownMenu.Item>
 						<DropdownMenu.Separator />
 						<div class="space-y-2 px-2 py-2">
 							<div class="flex items-center justify-between text-xs">
