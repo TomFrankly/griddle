@@ -411,3 +411,54 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 	const buffer = writePsd({ width: W, height: H, canvas: composite, children } as Parameters<typeof writePsd>[0]);
 	return new Blob([buffer], { type: 'image/vnd.adobe.photoshop' });
 }
+
+export type CellExportOptions = { corners: boolean; shadow: boolean; captions: boolean };
+
+/**
+ * Renders each image's cell on its own, with its styling, as PNG files: the cell box, image,
+ * border and (optionally) rounded corners, shadow and captions. Divider lines and the canvas
+ * background are left out, so anything outside the box is transparent.
+ */
+export async function renderCells(
+	layout: Layout,
+	images: GridImage[],
+	opts: RenderOptions,
+	pick: CellExportOptions
+): Promise<{ index: number; blob: Blob }[]> {
+	const style: CellStyle = {
+		...opts.style,
+		corners: { ...opts.style.corners, on: opts.style.corners.on && pick.corners },
+		shadow: { ...opts.style.shadow, on: opts.style.shadow.on && pick.shadow },
+		lines: { ...opts.style.lines, on: false }
+	};
+	const caps = style.captions.on && pick.captions;
+	await ensureCaptionFonts(style.captions);
+	const items = plan(layout, layout.cells.map((_, i) => images[i] ?? null), opts.fit, style);
+	const sh = style.shadow;
+	const margin = sh.on && sh.strength > 0 ? Math.ceil(sh.softness * 1.5 + sh.distance) : 0;
+	const out: { index: number; blob: Blob }[] = [];
+	for (let i = 0; i < items.length; i++) {
+		const it = items[i];
+		if (!it) continue;
+		const box = caps
+			? { x: it.cell.x, y: it.cell.y - layout.bandAbove, w: it.cell.w, h: it.cell.h + layout.bandAbove + layout.bandBelow }
+			: it.visible;
+		const left = Math.floor(box.x) - margin;
+		const top = Math.floor(box.y) - margin;
+		const canvas = document.createElement('canvas');
+		canvas.width = Math.ceil(box.x + box.w) + margin - left;
+		canvas.height = Math.ceil(box.y + box.h) + margin - top;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('Canvas is not available in this browser.');
+		ctx.translate(-left, -top);
+		drawShadows(ctx, [it], style, 1);
+		drawFills(ctx, [it], style, opts.cellBackground);
+		const bmp = await decode(images[i].file);
+		drawImage(ctx, it, bmp, borderInset(style, 1));
+		bmp.close();
+		drawBorders(ctx, [it], style);
+		if (caps) drawCaptions(ctx, [it.cell], [images[i]], style.captions, 1);
+		out.push({ index: i, blob: await canvasToBlob(canvas, 'png') });
+	}
+	return out;
+}

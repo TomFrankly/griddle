@@ -38,7 +38,7 @@
 	import { Toggle } from '$lib/components/ui/toggle/index.js';
 	import { autoGrid, computeLayout, randomSpans } from '$lib/grid';
 	import DicesIcon from '@lucide/svelte/icons/dices';
-	import { captionBands, ensureCaptionFonts, fromPlain } from '$lib/captions';
+	import { captionBands, ensureCaptionFonts, fromPlain, plainText } from '$lib/captions';
 	import TextStyleFields from '$lib/components/text-style-fields.svelte';
 	import LooksMenu from '$lib/components/looks-menu.svelte';
 	import AlignLeftIcon from '@lucide/svelte/icons/align-left';
@@ -54,6 +54,7 @@
 		loadImage,
 		renderFull,
 		renderPsd,
+		renderCells,
 		DEFAULT_STYLE,
 		type Background,
 		type CellStyle,
@@ -661,6 +662,37 @@
 		}
 	}
 
+	let cellPick = $state({ corners: true, shadow: true, captions: true });
+
+	/** Each image's cell as its own PNG, zipped. */
+	async function downloadCells() {
+		if (!images.length || busy) return;
+		busy = true;
+		try {
+			const [{ zipSync }, files] = await Promise.all([
+				import('fflate'),
+				renderCells(layout, images, { background, cellBackground, fit, style: $state.snapshot(style) as CellStyle }, $state.snapshot(cellPick))
+			]);
+			const width = String(files.length).length < 2 ? 2 : String(files.length).length;
+			const used = new Set<string>();
+			const entries: Record<string, [Uint8Array, { level: 0 }]> = {};
+			for (const f of files) {
+				const img = images[f.index];
+				const label = plainText(img.title).trim() || img.name.replace(/\.[^.]+$/, '');
+				const slug = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'image';
+				let name = `${String(f.index + 1).padStart(width, '0')}-${slug}.png`;
+				while (used.has(name)) name = name.replace(/\.png$/, '-1.png');
+				used.add(name);
+				entries[name] = [new Uint8Array(await f.blob.arrayBuffer()), { level: 0 }];
+			}
+			save(new Blob([zipSync(entries) as Uint8Array<ArrayBuffer>], { type: 'application/zip' }), fileName('zip').replace(/\.zip$/, '-cells.zip'));
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Export failed');
+		} finally {
+			busy = false;
+		}
+	}
+
 	async function copy() {
 		if (!images.length || busy) return;
 		if (!('ClipboardItem' in window) || !navigator.clipboard?.write) {
@@ -939,6 +971,16 @@
 						<DropdownMenu.Item onclick={() => download('psd')} data-testid="download-psd">
 							PSD <span class="text-muted-foreground ml-auto text-xs">layers</span>
 						</DropdownMenu.Item>
+						<DropdownMenu.Sub>
+							<DropdownMenu.SubTrigger data-testid="download-cells-menu">Each cell <span class="text-muted-foreground ml-auto text-xs">ZIP</span></DropdownMenu.SubTrigger>
+							<DropdownMenu.SubContent class="w-48">
+								<DropdownMenu.CheckboxItem bind:checked={cellPick.corners} closeOnSelect={false}>Rounded corners</DropdownMenu.CheckboxItem>
+								<DropdownMenu.CheckboxItem bind:checked={cellPick.shadow} closeOnSelect={false}>Shadow</DropdownMenu.CheckboxItem>
+								<DropdownMenu.CheckboxItem bind:checked={cellPick.captions} closeOnSelect={false}>Captions</DropdownMenu.CheckboxItem>
+								<DropdownMenu.Separator />
+								<DropdownMenu.Item onclick={downloadCells} data-testid="download-cells">Download {images.length} PNG{images.length === 1 ? '' : 's'}</DropdownMenu.Item>
+							</DropdownMenu.SubContent>
+						</DropdownMenu.Sub>
 						<DropdownMenu.Separator />
 						<div class="space-y-2 px-2 py-2">
 							<div class="flex items-center justify-between text-xs">

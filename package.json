@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "ag-psd": "^34.1.0",
+    "fflate": "^0.8.2",
     "prosemirror-commands": "^1.7.2",
     "prosemirror-history": "^1.5.1",
     "prosemirror-keymap": "^1.2.3",
