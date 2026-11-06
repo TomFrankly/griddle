@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { exampleFiles } from '$lib/examples';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
@@ -29,6 +29,8 @@
 	import ArrowDownAZIcon from '@lucide/svelte/icons/arrow-down-a-z';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import XIcon from '@lucide/svelte/icons/x';
+	import MinusIcon from '@lucide/svelte/icons/minus';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
 	import PanelBottomIcon from '@lucide/svelte/icons/panel-bottom';
 	import RichText from '$lib/components/rich-text.svelte';
@@ -239,9 +241,50 @@
 		const pad = stageW < 640 ? 12 : 32;
 		const availW = Math.max(50, stageW - pad * 2);
 		const availH = Math.max(50, stageH - pad * 2);
-		const k = Math.min(1, availW / layout.width, availH / layout.height);
-		return { w: Math.max(1, Math.floor(layout.width * k)), h: Math.max(1, Math.floor(layout.height * k)), k };
+		const k = Math.min(1, availW / layout.width, availH / layout.height) * viewZoom;
+		return { w: Math.max(1, Math.floor(layout.width * k)), h: Math.max(1, Math.floor(layout.height * k)), k, pad };
 	});
+
+	// Viewing zoom for the preview only: 1 fits the grid in the stage.
+	const ZOOM_MIN = 0.25;
+	const ZOOM_VIEW_MAX = 4;
+	let viewZoom = $state(1);
+	let scroller = $state<HTMLDivElement>();
+	/** Zooms the view, keeping the point under (x, y) in place when one is given. */
+	async function zoomTo(z: number, at?: { x: number; y: number }) {
+		const next = Math.min(ZOOM_VIEW_MAX, Math.max(ZOOM_MIN, z));
+		const el = scroller;
+		if (!el || next === viewZoom) {
+			viewZoom = next;
+			return;
+		}
+		const box = el.getBoundingClientRect();
+		const ax = at ? at.x - box.left : box.width / 2;
+		const ay = at ? at.y - box.top : box.height / 2;
+		const r = next / viewZoom;
+		const cx = el.scrollLeft + ax;
+		const cy = el.scrollTop + ay;
+		viewZoom = next;
+		await tick();
+		el.scrollLeft = cx * r - ax;
+		el.scrollTop = cy * r - ay;
+	}
+	function zoomStep(dir: 1 | -1) {
+		const steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+		const next = dir > 0 ? steps.find((s) => s > viewZoom + 0.001) : [...steps].reverse().find((s) => s < viewZoom - 0.001);
+		zoomTo(next ?? viewZoom);
+	}
+	/** Mod + scroll (and trackpad pinch, which arrives as Ctrl + scroll) zooms around the pointer. */
+	function wheelZoom(node: HTMLElement) {
+		const onWheel = (e: WheelEvent) => {
+			if (!(e.ctrlKey || e.metaKey)) return;
+			e.preventDefault();
+			const speed = e.deltaMode === 1 ? 0.05 : 0.0025;
+			zoomTo(viewZoom * Math.exp(-e.deltaY * speed * (e.ctrlKey && !e.metaKey && Math.abs(e.deltaY) < 20 ? 4 : 1)), { x: e.clientX, y: e.clientY });
+		};
+		node.addEventListener('wheel', onWheel, { passive: false });
+		return { destroy: () => node.removeEventListener('wheel', onWheel) };
+	}
 	const k = $derived(preview.w / layout.width);
 	const displayCells = $derived(
 		layout.cells.map((c) => ({ x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k }))
@@ -249,7 +292,8 @@
 
 	$effect(() => {
 		if (!canvas || images.length === 0) return;
-		const dpr = window.devicePixelRatio || 1;
+		// Very large zooms draw at a lower density to keep the canvas a reasonable size.
+		const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(24e6 / (preview.w * preview.h)));
 		const w = Math.round(preview.w * dpr);
 		const h = Math.round(preview.h * dpr);
 		if (canvas.width !== w) canvas.width = w;
@@ -496,7 +540,10 @@
 		const t = e.target as HTMLElement | null;
 		if (t?.closest('input, textarea, [contenteditable="true"]')) return;
 		const key = e.key.toLowerCase();
-		if (key === 'z' && !e.shiftKey) undo();
+		if (key === '=' || key === '+') zoomStep(1);
+		else if (key === '-' || key === '_') zoomStep(-1);
+		else if (key === '0') zoomTo(1);
+		else if (key === 'z' && !e.shiftKey) undo();
 		else if ((key === 'z' && e.shiftKey) || (key === 'y' && e.ctrlKey && !e.metaKey)) redo();
 		else return;
 		e.preventDefault();
@@ -1379,7 +1426,9 @@
 					class="bg-accent relative flex h-[62svh] items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
 					{#if images.length}
-						<div bind:this={previewEl} class="relative shadow-sm" style="width:{preview.w}px;height:{preview.h}px">
+						<div bind:this={scroller} use:wheelZoom class="absolute inset-0 overflow-auto" data-testid="stage-scroll">
+						<div class="flex min-h-full min-w-full w-max items-center justify-center" style:padding="{preview.pad}px">
+						<div bind:this={previewEl} class="relative shrink-0 shadow-sm" style="width:{preview.w}px;height:{preview.h}px">
 							<canvas bind:this={canvas} class="checker absolute inset-0 size-full" data-testid="preview"></canvas>
 							{#each displayCells as rect, i (images[i]?.id ?? i)}
 								{#if images[i]}
@@ -1408,6 +1457,19 @@
 									data-testid="grid-insert-line"
 								></div>
 							{/if}
+						</div>
+						</div>
+						</div>
+						<div class="bg-background/90 absolute right-3 bottom-3 z-20 flex items-center rounded-md border shadow-sm backdrop-blur-sm" data-testid="zoom-controls">
+							<button type="button" class="hover:bg-accent flex size-7 items-center justify-center rounded-l-md disabled:opacity-40" aria-label="Zoom out" title="Zoom out ({mod}−)" disabled={viewZoom <= ZOOM_MIN} onclick={() => zoomStep(-1)}>
+								<MinusIcon class="size-3.5" />
+							</button>
+							<button type="button" class="hover:bg-accent h-7 min-w-12 px-1 text-xs tabular-nums" title="Fit to window ({mod}0)" data-testid="zoom-level" onclick={() => zoomTo(1)}>
+								{viewZoom === 1 ? 'Fit' : `${Math.round(viewZoom * 100)}%`}
+							</button>
+							<button type="button" class="hover:bg-accent flex size-7 items-center justify-center rounded-r-md disabled:opacity-40" aria-label="Zoom in" title="Zoom in ({mod}+)" disabled={viewZoom >= ZOOM_VIEW_MAX} onclick={() => zoomStep(1)}>
+								<PlusIcon class="size-3.5" />
+							</button>
 						</div>
 						{#if lift && images[lift.from]}
 							<img

@@ -154,6 +154,8 @@
 	}
 
 	function onWheel(e: WheelEvent) {
+		// With Ctrl or Cmd held, scrolling zooms the whole view instead.
+		if (e.ctrlKey || e.metaKey) return;
 		e.preventDefault();
 		const z = image.adjust.zoom * Math.exp(-e.deltaY * 0.002);
 		image.adjust.zoom = Math.min(ZOOM_MAX, Math.max(1, z));
