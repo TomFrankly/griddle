@@ -33,6 +33,8 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import InfoDialogs from '$lib/components/info-dialogs.svelte';
 	import ArrowLeftRightIcon from '@lucide/svelte/icons/arrow-left-right';
 	import LocateFixedIcon from '@lucide/svelte/icons/locate-fixed';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
@@ -340,6 +342,7 @@
 		target.addEventListener('pointerup', up);
 		target.addEventListener('pointercancel', up);
 	}
+	let infoOpen = $state<'help' | 'privacy' | null>(null);
 	let paneList = $state<HTMLDivElement>();
 	/** Scrolls the side panel to an image's row, about 30% down, and flashes it. */
 	function revealInPane(id: string) {
@@ -1177,6 +1180,7 @@
 
 <ModeWatcher />
 <Toaster position="bottom-center" />
+<InfoDialogs bind:open={infoOpen} />
 
 {#snippet dockHeader()}
 	<div class="flex h-9 items-center gap-1 border-b px-3">
@@ -1365,6 +1369,19 @@
 							</div>
 							<Slider type="single" bind:value={quality} min={40} max={100} step={1} aria-label="Quality" />
 						</div>
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger>
+						{#snippet child({ props })}
+							<Button {...props} variant="ghost" size="icon-sm" aria-label="Help and privacy" data-testid="info">
+								<InfoIcon />
+							</Button>
+						{/snippet}
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="end" class="w-40">
+						<DropdownMenu.Item onclick={() => (infoOpen = 'help')} data-testid="info-help">Help</DropdownMenu.Item>
+						<DropdownMenu.Item onclick={() => (infoOpen = 'privacy')} data-testid="info-privacy">Privacy</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
 			</div>
