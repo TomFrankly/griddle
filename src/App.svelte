@@ -9,6 +9,8 @@
 	import { watchForUpdates } from '$lib/update-check';
 	import { Toaster } from '$lib/components/ui/sonner/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import { FILE_EXT, safeFileName } from '$lib/file-name';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
@@ -894,7 +896,22 @@
 		for (const img of images) img.adjust = { zoom: 1, ox: 0, oy: 0 };
 	}
 
-	const fileName = (ext: string) => `griddle-${layout.cols}x${layout.rows}-${layout.width}x${layout.height}.${ext}`;
+	const defaultName = $derived(`griddle-${layout.cols}x${layout.rows}-${layout.width}x${layout.height}`);
+	let exportName = $state(
+		(() => {
+			try {
+				return localStorage.getItem('griddle:export-name') ?? '';
+			} catch {
+				return '';
+			}
+		})()
+	);
+	$effect(() => {
+		try {
+			localStorage.setItem('griddle:export-name', exportName);
+		} catch {}
+	});
+	const fileName = (ext: string) => `${safeFileName(exportName) || defaultName}.${ext}`;
 
 	function save(blob: Blob, name: string) {
 		const url = URL.createObjectURL(blob);
@@ -913,12 +930,12 @@
 		try {
 			if (format === 'psd') {
 				const blob = await renderPsd(layout, images, { background, cellBackground, fit, style: $state.snapshot(style) as CellStyle });
-				save(blob, fileName('psd'));
+				save(blob, fileName(FILE_EXT.psd));
 				return;
 			}
 			const full = await renderFull(layout, images, { background, cellBackground, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
 			const blob = await canvasToBlob(full, format, quality / 100);
-			save(blob, fileName(format === 'jpeg' ? 'jpg' : format));
+			save(blob, fileName(FILE_EXT[format]));
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Export failed');
 		} finally {
@@ -1758,6 +1775,13 @@
 								onclick={() => (exportFormat = f.id)}>{f.label}</button
 							>
 						{/each}
+					</div>
+					<div class="space-y-1.5">
+						<label class="text-sm" for="export-name">File name</label>
+						<div class="relative">
+							<Input id="export-name" bind:value={exportName} placeholder={defaultName} spellcheck={false} autocomplete="off" class="pr-14" data-testid="export-name" />
+							<span class="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">.{FILE_EXT[exportFormat]}</span>
+						</div>
 					</div>
 					{#if exportFormat === 'jpeg' || exportFormat === 'webp'}
 						<div transition:slide={{ duration: 150 }}><SliderField label="Quality" bind:value={quality} min={40} max={100} unit="%" /></div>
