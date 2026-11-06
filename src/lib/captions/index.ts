@@ -17,8 +17,9 @@ export type TextStyle = {
 	size: number;
 	color: string;
 	position: 'above' | 'below';
-	/** Space between this text and the image (or the text before it), in output pixels. */
-	offset: number;
+	/** Space above and below this text, in output pixels. */
+	padTop: number;
+	padBottom: number;
 	/** Lines kept before the text is cut off with an ellipsis. */
 	lines: number;
 	shadow: TextShadow;
@@ -36,8 +37,8 @@ const NO_SHADOW: TextShadow = { on: false, strength: 40, distance: 2, softness: 
 export const DEFAULT_CAPTIONS: CaptionStyle = {
 	on: false,
 	align: 'center',
-	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', offset: 16, lines: 1, shadow: { ...NO_SHADOW } },
-	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', offset: 6, lines: 2, shadow: { ...NO_SHADOW } }
+	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, lines: 1, shadow: { ...NO_SHADOW } },
+	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, lines: 2, shadow: { ...NO_SHADOW } }
 };
 
 export const LINE_HEIGHT = 1.3;
@@ -60,7 +61,7 @@ function parts(c: CaptionStyle, where: 'above' | 'below'): Part[] {
 	return where === 'above' ? list.reverse() : list;
 }
 
-const blockHeight = (s: TextStyle) => s.offset + Math.max(1, s.lines) * s.size * LINE_HEIGHT;
+const blockHeight = (s: TextStyle) => s.padTop + s.padBottom + Math.max(1, s.lines) * s.size * LINE_HEIGHT;
 
 /** Space a row needs above and below its images. */
 export function captionBands(c: CaptionStyle): { above: number; below: number } {
@@ -246,15 +247,16 @@ export function drawCaptions(ctx: Ctx, cells: Rect[], texts: (Captioned | null)[
 		let y = cell.y;
 		for (const { key, style } of parts(c, 'above')) {
 			const h = style.lines * style.size * LINE_HEIGHT;
-			y -= style.offset + h;
+			y -= style.padBottom + h;
 			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { x: cell.x, y, w: cell.w, h }, c.align, scale);
+			y -= style.padTop;
 		}
 		y = cell.y + cell.h;
 		for (const { key, style } of parts(c, 'below')) {
 			const h = style.lines * style.size * LINE_HEIGHT;
-			y += style.offset;
+			y += style.padTop;
 			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { x: cell.x, y, w: cell.w, h }, c.align, scale);
-			y += h;
+			y += h + style.padBottom;
 		}
 	});
 }

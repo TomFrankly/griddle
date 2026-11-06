@@ -55,7 +55,8 @@
 							<ToggleGroup.Item value="below" class="px-3">Below</ToggleGroup.Item>
 						</ToggleGroup.Root>
 					</div>
-					<SliderField label="Offset" bind:value={value.offset} max={Math.max(40, maxSize)} />
+					<SliderField label="Top padding" bind:value={value.padTop} max={Math.max(60, maxSize)} />
+					<SliderField label="Bottom padding" bind:value={value.padBottom} max={Math.max(60, maxSize)} />
 					<div class="flex items-center justify-between">
 						<span class="text-sm">Max lines</span>
 						<Stepper bind:value={value.lines} min={1} max={6} label="{title} max lines" />

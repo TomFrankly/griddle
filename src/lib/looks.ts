@@ -27,7 +27,8 @@ export function scaleStyle(s: CellStyle, k: number): CellStyle {
 	const text = (t: CellStyle['captions']['title']) => ({
 		...t,
 		size: r(t.size, k, 4),
-		offset: r(t.offset, k),
+		padTop: r(t.padTop, k),
+		padBottom: r(t.padBottom, k),
 		shadow: { ...t.shadow, distance: r(t.shadow.distance, k), softness: r(t.shadow.softness, k) }
 	});
 	return {
@@ -53,8 +54,8 @@ export function applyLook(look: Look, ref: number): Omit<Look, 'ref'> {
 	};
 }
 
-/** Fills in settings added after a look was saved. */
-function withDefaults(s: Partial<CellStyle>): CellStyle {
+/** Fills in settings added after a look or session was saved. */
+export function withDefaults(s: Partial<CellStyle>): CellStyle {
 	const d = structuredClone(DEFAULT_STYLE);
 	return {
 		corners: { ...d.corners, ...s.corners },
@@ -117,7 +118,7 @@ export const BUILT_IN_LOOKS: NamedLook[] = [
 			l.style.captions = {
 				...structuredClone(DEFAULT_CAPTIONS),
 				on: true,
-				title: { ...structuredClone(DEFAULT_CAPTIONS.title), font: 'Caveat', size: 48, color: '#2b2b2b', offset: 14 },
+				title: { ...structuredClone(DEFAULT_CAPTIONS.title), font: 'Caveat', size: 48, color: '#2b2b2b', padTop: 14, padBottom: 6 },
 				desc: { ...structuredClone(DEFAULT_CAPTIONS.desc), on: false }
 			};
 			return l;

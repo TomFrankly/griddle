@@ -43,7 +43,7 @@
 	import AlignLeftIcon from '@lucide/svelte/icons/align-left';
 	import AlignCenterIcon from '@lucide/svelte/icons/align-center';
 	import AlignRightIcon from '@lucide/svelte/icons/align-right';
-	import { applyLook, scaleStyle, type Look } from '$lib/looks';
+	import { applyLook, scaleStyle, withDefaults, type Look } from '$lib/looks';
 	import { loadFiles, loadSettings, saveSettings, syncFiles } from '$lib/persist';
 	import {
 		canvasToBlob,
@@ -428,7 +428,7 @@
 		linkPadding = snap.linkPadding;
 		bgId = snap.bgId === 'image' && !bgImage ? 'white' : snap.bgId;
 		customColor = snap.customColor;
-		style = structuredClone(snap.style);
+		style = withDefaults(structuredClone(snap.style));
 		size = snap.size;
 		customSize = snap.customSize;
 		lastLongEdge = FRAMES.find((f) => f.value === snap.size)
