@@ -3,7 +3,8 @@
   the slider to zoom, and reset to the default size and position. Dropping image files on it
   replaces the image. Hover controls also set how many cells the image spans and edit its caption.
   On small cells the controls fold into one button that drags to move and opens a menu with
-  everything; right-clicking any cell opens the same menu.
+  everything; right-clicking any cell opens the same menu. An empty slot shows a placeholder
+  instead: click it or drop images on it to fill it.
 -->
 <script lang="ts">
 	import { Slider } from '$lib/components/ui/slider/index.js';
@@ -14,6 +15,9 @@
 	import GripIcon from '@lucide/svelte/icons/grip';
 	import ImageUpIcon from '@lucide/svelte/icons/image-up';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import ImagePlusIcon from '@lucide/svelte/icons/image-plus';
+	import ImageOffIcon from '@lucide/svelte/icons/image-off';
+	import SquarePlusIcon from '@lucide/svelte/icons/square-plus';
 	import Stepper from './stepper.svelte';
 	import RichText from './rich-text.svelte';
 	import { minZoom, placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
@@ -35,6 +39,8 @@
 		captions,
 		onreorder,
 		onremove,
+		onclear,
+		onaddslot,
 		lifted = false
 	}: {
 		rect: Rect;
@@ -57,7 +63,14 @@
 		/** True while this image is being moved. */
 		lifted?: boolean;
 		onremove?: () => void;
+		/** Takes the image out but keeps the cell. */
+		onclear?: () => void;
+		/** Adds an empty slot after this cell. */
+		onaddslot?: () => void;
 	} = $props();
+
+	const empty = $derived(!image.file);
+	const label = $derived(empty ? 'slot' : 'image');
 
 	let spanOpen = $state(false);
 	let textOpen = $state(false);
@@ -131,8 +144,9 @@
 		onfiles(e.dataTransfer.files);
 	}
 	const box = $derived(area ?? rect);
-	const place = $derived(placeImage(image.width, image.height, box, fit, image.adjust, free));
-	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
+	const NO_PLACE = { x: 0, y: 0, w: 0, h: 0, slackX: 1, slackY: 1, limitX: 0, limitY: 0 };
+	const place = $derived(empty ? NO_PLACE : placeImage(image.width, image.height, box, fit, image.adjust, free));
+	const zoomMin = $derived(empty ? 1 : Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
 	const movable = $derived(place.limitX > 0.001 || place.limitY > 0.001);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
 	// Hover controls are 28 px round; this keeps them inside the cell's rounded corners.
@@ -175,7 +189,7 @@
 
 	function onWheel(e: WheelEvent) {
 		// With Ctrl or Cmd held, scrolling zooms the whole view instead.
-		if (e.ctrlKey || e.metaKey) return;
+		if (e.ctrlKey || e.metaKey || empty) return;
 		e.preventDefault();
 		const z = image.adjust.zoom * Math.exp(-e.deltaY * 0.002);
 		image.adjust.zoom = Math.min(ZOOM_MAX, Math.max(zoomMin, z));
@@ -192,6 +206,13 @@
 	}
 
 	function onKey(e: KeyboardEvent) {
+		if (empty) {
+			if (e.key === 'Enter' && e.target === e.currentTarget) {
+				e.preventDefault();
+				fileInput?.click();
+			}
+			return;
+		}
 		const step = e.shiftKey ? 0.2 : 0.05;
 		const d: Record<string, [number, number]> = {
 			ArrowLeft: [-step, 0],
@@ -219,10 +240,13 @@
 	style:height="{rect.h}px"
 	style:--ci="{controlInset}px"
 	role="application"
-	aria-roledescription="image crop"
+	aria-roledescription={empty ? 'empty slot' : 'image crop'}
 	tabindex="0"
-	aria-label="Image {index + 1}: {image.name}. Drag or use arrow keys to move it, double-click to center it, scroll to zoom."
+	aria-label={empty
+		? `Empty slot ${index + 1}. Drop images here or press Enter to choose one.`
+		: `Image ${index + 1}: ${image.name}. Drag or use arrow keys to move it, double-click to center it, scroll to zoom.`}
 	data-testid="cell"
+	data-empty={empty || undefined}
 	data-index={index}
 	onpointerdown={onPointerDown}
 	onwheel={onWheel}
@@ -235,6 +259,23 @@
 	ondblclick={recenter}
 	onclick={onClick}
 >
+	{#if empty}
+		<button
+			type="button"
+			class="group/empty bg-foreground/[0.04] ring-foreground/15 hover:bg-foreground/[0.08] absolute inset-0 flex items-center justify-center ring-1 ring-inset transition-colors"
+			style:border-radius="{radius}px"
+			tabindex="-1"
+			aria-label="Add an image to slot {index + 1}"
+			data-testid="cell-empty"
+			onclick={() => fileInput?.click()}
+		>
+			<!-- A pill like the hover controls, so it reads on any cell background. -->
+			<span class="{pill} text-muted-foreground group-hover/empty:text-foreground {rect.w >= 110 && rect.h >= 60 ? 'px-3 text-xs font-medium' : 'size-7'}">
+				<ImagePlusIcon class="size-3.5" />
+				{#if rect.w >= 110 && rect.h >= 60}Add image{/if}
+			</span>
+		</button>
+	{/if}
 	{#if lifted}
 		<div class="bg-background/60 pointer-events-none absolute inset-0" style:border-radius="{radius}px"></div>
 	{/if}
@@ -244,7 +285,7 @@
 			style:border-radius="{radius}px"
 			data-testid="cell-drop"
 		>
-			<span class="bg-primary text-primary-foreground px-2 py-0.5 text-xs font-medium">Replace</span>
+			<span class="bg-primary text-primary-foreground px-2 py-0.5 text-xs font-medium">{empty ? 'Add' : 'Replace'}</span>
 		</div>
 	{/if}
 	<div
@@ -256,6 +297,7 @@
 		bind:this={fileInput}
 		type="file"
 		accept="image/*"
+		multiple={empty}
 		class="hidden"
 		onchange={(e) => {
 			if (e.currentTarget.files?.length) onfiles?.(e.currentTarget.files);
@@ -273,26 +315,54 @@
 					<span class="text-sm">Down</span>
 					<Stepper bind:value={image.span.h} min={1} max={Math.max(1, rows)} label="Cells down" />
 				</div>
-				<div class="space-y-2">
-					<div class="flex items-center justify-between text-sm">
-						<span>Zoom</span>
-						<button type="button" class="text-muted-foreground hover:text-foreground text-xs disabled:opacity-40" disabled={!adjusted} onclick={reset}>Reset</button>
+				{#if !empty}
+					<div class="space-y-2">
+						<div class="flex items-center justify-between text-sm">
+							<span>Zoom</span>
+							<button type="button" class="text-muted-foreground hover:text-foreground text-xs disabled:opacity-40" disabled={!adjusted} onclick={reset}>Reset</button>
+						</div>
+						<Slider type="single" min={zoomMin} max={ZOOM_MAX} step={0.01} bind:value={image.adjust.zoom} aria-label="Zoom image {index + 1}" />
 					</div>
-					<Slider type="single" min={zoomMin} max={ZOOM_MAX} step={0.01} bind:value={image.adjust.zoom} aria-label="Zoom image {index + 1}" />
-				</div>
+				{/if}
 				{#if hasCaptions && captions}
 					{#if captions.title.on}
-						<RichText bind:value={image.title} label="Title for image {index + 1}" placeholder="Title" testid="menu-title" />
+						<RichText bind:value={image.title} label="Title for {label} {index + 1}" placeholder="Title" testid="menu-title" />
 					{/if}
 					{#if captions.desc.on}
-						<RichText bind:value={image.desc} label="Description for image {index + 1}" placeholder="Description" testid="menu-desc" />
+						<RichText bind:value={image.desc} label="Description for {label} {index + 1}" placeholder="Description" testid="menu-desc" />
 					{/if}
 				{/if}
 			</div>
 			<div class="border-t p-1">
-				<button type="button" class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm" onclick={() => fileInput?.click()}>
-					<ImageUpIcon class="size-4" /> Replace image
+				<button type="button" class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm" onclick={() => fileInput?.click()} data-testid="cell-pick">
+					{#if empty}<ImagePlusIcon class="size-4" /> Add image{:else}<ImageUpIcon class="size-4" /> Replace image{/if}
 				</button>
+				{#if onclear && !empty}
+					<button
+						type="button"
+						class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
+						onclick={() => {
+							allOpen = false;
+							onclear();
+						}}
+						data-testid="cell-clear"
+					>
+						<ImageOffIcon class="size-4" /> Empty this cell
+					</button>
+				{/if}
+				{#if onaddslot}
+					<button
+						type="button"
+						class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
+						onclick={() => {
+							allOpen = false;
+							onaddslot();
+						}}
+						data-testid="cell-add-slot"
+					>
+						<SquarePlusIcon class="size-4" /> Add empty slot after
+					</button>
+				{/if}
 				{#if onremove}
 					<button
 						type="button"
@@ -303,7 +373,7 @@
 						}}
 						data-testid="cell-remove"
 					>
-						<Trash2Icon class="size-4" /> Remove
+						<Trash2Icon class="size-4" /> {empty ? 'Remove slot' : 'Remove'}
 					</button>
 				{/if}
 			</div>
@@ -314,7 +384,7 @@
 			type="button"
 			class="{pill} absolute top-[var(--ci)] left-[var(--ci)] size-7 cursor-grab opacity-0 transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 active:cursor-grabbing"
 			class:opacity-100={menuOpen}
-			aria-label="Options for image {index + 1}"
+			aria-label="Options for {label} {index + 1}"
 			title="Drag to move, click for options"
 			data-testid="cell-more"
 			data-cell-control
@@ -338,7 +408,7 @@
 				<button
 					type="button"
 					class="{pill} size-7 cursor-grab touch-none active:cursor-grabbing"
-					aria-label="Move image {index + 1}"
+					aria-label="Move {label} {index + 1}"
 					title="Drag to move"
 					data-testid="cell-move"
 					onpointerdown={(e) => {
@@ -357,7 +427,7 @@
 							{...props}
 							type="button"
 							class="{pill} px-2 text-xs tabular-nums"
-							aria-label="Cells image {index + 1} spans: {image.span.w} across, {image.span.h} down"
+							aria-label="Cells {label} {index + 1} spans: {image.span.w} across, {image.span.h} down"
 							data-testid="cell-span"
 						>
 							<LayoutGridIcon class="size-3.5" />
@@ -381,7 +451,7 @@
 				<Popover.Root bind:open={textOpen}>
 					<Popover.Trigger>
 						{#snippet child({ props })}
-							<button {...props} type="button" class="{pill} size-7" aria-label="Caption for image {index + 1}" data-testid="cell-caption">
+							<button {...props} type="button" class="{pill} size-7" aria-label="Caption for {label} {index + 1}" data-testid="cell-caption">
 								<TypeIcon class="size-3.5" />
 							</button>
 						{/snippet}
@@ -390,13 +460,13 @@
 						{#if captions.title.on}
 							<div class="space-y-1.5">
 								<div class="text-muted-foreground text-xs">Title</div>
-								<RichText bind:value={image.title} label="Title for image {index + 1}" placeholder="Add a title" testid="caption-title" />
+								<RichText bind:value={image.title} label="Title for {label} {index + 1}" placeholder="Add a title" testid="caption-title" />
 							</div>
 						{/if}
 						{#if captions.desc.on}
 							<div class="space-y-1.5">
 								<div class="text-muted-foreground text-xs">Description</div>
-								<RichText bind:value={image.desc} label="Description for image {index + 1}" placeholder="Add a description" testid="caption-desc" />
+								<RichText bind:value={image.desc} label="Description for {label} {index + 1}" placeholder="Add a description" testid="caption-desc" />
 							</div>
 						{/if}
 						<div class="text-muted-foreground text-[11px]">Select text to format it.</div>
@@ -409,13 +479,14 @@
 			class="bg-background/70 text-foreground hover:bg-background/90 absolute top-[var(--ci)] right-[var(--ci)] flex size-7 items-center justify-center rounded-full opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 disabled:hidden"
 			aria-label="Reset image {index + 1}"
 			title="Reset"
-			disabled={!adjusted}
+			disabled={!adjusted || empty}
 			data-testid="cell-reset"
 			data-cell-control
 			onclick={reset}
 		>
 			<RotateCcwIcon class="size-3.5" />
 		</button>
+		{#if !empty}
 		<div
 			class="bg-background/70 absolute inset-x-[var(--ci)] bottom-[var(--ci)] flex h-7 items-center rounded-full px-3 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
 			class:opacity-100={menuOpen}
@@ -432,5 +503,6 @@
 				data-testid="cell-zoom"
 			/>
 		</div>
+		{/if}
 	{/if}
 </div>

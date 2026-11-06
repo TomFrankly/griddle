@@ -22,7 +22,7 @@
 		<ol class="space-y-3 text-sm">
 			<li>
 				<span class="font-medium">1. Add images.</span>
-				Drop them anywhere on the page or use Add images. Drop a file on a cell to replace it, or into the image list to insert it.
+				Drop them anywhere on the page or use Add images. Drop a file on a cell to replace it, or into the image list to insert it. To plan the layout first, start with empty slots or add one from the image list, then drop images into them.
 			</li>
 			<li>
 				<span class="font-medium">2. Arrange them.</span>
