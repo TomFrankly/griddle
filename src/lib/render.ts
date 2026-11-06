@@ -11,6 +11,7 @@ import {
 	type RichText
 } from './captions';
 import type { Span } from './grid';
+import { DEFAULT_LINES, drawLines, type LineStyle } from './lines';
 
 export type FitMode = 'fill' | 'fit';
 
@@ -81,7 +82,7 @@ export type CellStyle = {
 	corners: { on: boolean; radius: number };
 	border: { on: boolean; width: number; color: string; opacity: number };
 	shadow: { on: boolean; strength: number; distance: number; softness: number };
-	lines: { on: boolean; width: number; color: string; opacity: number };
+	lines: LineStyle;
 	/** A box behind each image, filling its cell. Shows through transparent images. */
 	fill: { on: boolean; color: string; opacity: number; padding: number };
 	captions: CaptionStyle;
@@ -91,7 +92,7 @@ export const DEFAULT_STYLE: CellStyle = {
 	corners: { on: false, radius: 12 },
 	border: { on: false, width: 4, color: '#ffffff', opacity: 100 },
 	shadow: { on: false, strength: 35, distance: 8, softness: 24 },
-	lines: { on: false, width: 2, color: '#000000', opacity: 25 },
+	lines: DEFAULT_LINES,
 	fill: { on: false, color: '#f0f0f0', opacity: 100, padding: 0 },
 	captions: DEFAULT_CAPTIONS
 };
@@ -213,40 +214,6 @@ function drawBorders(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle) {
 	ctx.restore();
 }
 
-/**
- * Lines through the middle of the gaps between neighbouring cells, reaching the canvas edges at
- * the outside of the grid. All lines are filled as one path so crossings aren't drawn twice.
- */
-function drawLines(ctx: Ctx, layout: Layout, style: CellStyle) {
-	const l = style.lines;
-	if (!l.on || l.width <= 0 || !layout.cells.length) return;
-	const { slots, cells, gutter: g, bandAbove: ba, bandBelow: bb, cols, rows } = layout;
-	const eps = 1e-6;
-	const w = l.width;
-	const top = (i: number) => (slots[i].r === 0 ? 0 : cells[i].y - ba - g / 2);
-	const bottom = (i: number) => (slots[i].r + slots[i].h >= rows ? layout.height : cells[i].y + cells[i].h + bb + g / 2);
-	const left = (i: number) => (slots[i].c < eps ? 0 : cells[i].x - g / 2);
-	const right = (i: number) => (slots[i].c + slots[i].w > cols - eps ? layout.width : cells[i].x + cells[i].w + g / 2);
-	const overlaps = (a0: number, a1: number, b0: number, b1: number) => a0 < b1 - eps && b0 < a1 - eps;
-	ctx.save();
-	ctx.fillStyle = withAlpha(l.color, l.opacity);
-	ctx.beginPath();
-	slots.forEach((p, i) => {
-		const hasRight = slots.some((q) => Math.abs(q.c - (p.c + p.w)) < eps && overlaps(p.r, p.r + p.h, q.r, q.r + q.h));
-		if (hasRight) {
-			const x = cells[i].x + cells[i].w + g / 2;
-			ctx.rect(x - w / 2, top(i), w, bottom(i) - top(i));
-		}
-		const hasBelow = slots.some((q) => Math.abs(q.r - (p.r + p.h)) < eps && overlaps(p.c - 0.5, p.c + p.w + 0.5, q.c, q.c + q.w));
-		if (hasBelow) {
-			const y = cells[i].y + cells[i].h + bb + g / 2;
-			ctx.rect(left(i), y - w / 2, right(i) - left(i), w);
-		}
-	});
-	ctx.fill();
-	ctx.restore();
-}
-
 export type RenderOptions = { background: Background; fit: FitMode; style: CellStyle };
 
 /** Draws the grid onto a canvas whose size is `layout` × `scale`. */
@@ -267,7 +234,7 @@ export function drawGrid(
 	const inset = borderInset(opts.style, opts.scale);
 	items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
 	drawBorders(ctx, items, opts.style);
-	drawLines(ctx, layout, opts.style);
+	drawLines(ctx, layout, opts.style.lines);
 	drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
@@ -338,7 +305,7 @@ export async function renderFull(
 		bmp.close();
 	}
 	drawBorders(ctx, items, opts.style);
-	drawLines(ctx, layout, opts.style);
+	drawLines(ctx, layout, opts.style.lines);
 	drawCaptions(ctx, layout.cells, images, opts.style.captions, 1);
 	return canvas;
 }
@@ -402,7 +369,7 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 	children.push({ name: 'Images', children: imageLayers, opened: true });
 
 	if (opts.style.border.on && opts.style.border.width > 0) push(layer('Borders', full, (ctx) => drawBorders(ctx, items, opts.style)));
-	if (opts.style.lines.on && opts.style.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, opts.style)));
+	if (opts.style.lines.on && opts.style.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, opts.style.lines)));
 
 	const c = opts.style.captions;
 	if (c.on) {

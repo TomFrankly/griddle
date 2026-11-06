@@ -18,6 +18,7 @@
 	import ColorPicker from '$lib/components/color-picker.svelte';
 	import CellOverlay from '$lib/components/cell-overlay.svelte';
 	import ToggleSection from '$lib/components/toggle-section.svelte';
+	import LineStyleFields from '$lib/components/line-style-fields.svelte';
 	import SliderField from '$lib/components/slider-field.svelte';
 	import ColorField from '$lib/components/color-field.svelte';
 	import DownloadIcon from '@lucide/svelte/icons/download';
@@ -1089,9 +1090,7 @@
 					<SliderField label="Softness" bind:value={style.shadow.softness} max={spaceMax * 2} />
 				</ToggleSection>
 				<ToggleSection title="Divider lines" bind:on={style.lines.on}>
-					<SliderField label="Thickness" bind:value={style.lines.width} min={1} max={Math.max(20, Math.round(longEdge / 60))} />
-					<ColorField label="Color" bind:value={style.lines.color} />
-					<SliderField label="Opacity" bind:value={style.lines.opacity} unit="%" />
+					<LineStyleFields bind:value={style.lines} maxWidth={Math.max(20, Math.round(longEdge / 60))} {spaceMax} />
 				</ToggleSection>
 				<ToggleSection title="Captions" bind:on={style.captions.on}>
 					<div class="flex items-center justify-between">

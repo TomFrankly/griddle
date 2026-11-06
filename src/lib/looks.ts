@@ -35,7 +35,7 @@ export function scaleStyle(s: CellStyle, k: number): CellStyle {
 		corners: { ...s.corners },
 		border: { ...s.border, width: r(s.border.width, k, 1) },
 		shadow: { ...s.shadow, distance: r(s.shadow.distance, k), softness: r(s.shadow.softness, k) },
-		lines: { ...s.lines, width: r(s.lines.width, k, 1) },
+		lines: { ...s.lines, width: r(s.lines.width, k, 1), spacing: r(s.lines.spacing, k, 2), amplitude: r(s.lines.amplitude, k), markSize: r(s.lines.markSize, k, 2), inset: r(s.lines.inset, k) },
 		fill: { ...s.fill, padding: r(s.fill.padding, k) },
 		captions: { ...c, title: text(c.title), desc: text(c.desc) }
 	};
@@ -103,7 +103,17 @@ export const BUILT_IN_LOOKS: NamedLook[] = [
 		look: (() => {
 			const l = base();
 			l.gap = l.padding = 32;
-			l.style.lines = { on: true, width: 2, color: '#000000', opacity: 18 };
+			l.style.lines = { ...l.style.lines, on: true, width: 2, color: '#000000', opacity: 18 };
+			return l;
+		})()
+	},
+	{
+		id: 'proof',
+		name: 'Proof sheet',
+		look: (() => {
+			const l = base();
+			l.gap = l.padding = 48;
+			l.style.lines = { ...l.style.lines, on: true, type: 'none', crossing: 'plus', markSize: 28, width: 2, color: '#000000', opacity: 70 };
 			return l;
 		})()
 	},
