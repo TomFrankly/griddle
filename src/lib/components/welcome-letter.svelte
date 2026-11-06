@@ -25,20 +25,20 @@
 			startButton?.focus();
 		}}
 	>
-		<div class="bg-muted hidden items-center justify-center p-6 md:flex">
+		<div class="bg-muted relative hidden items-center justify-center overflow-hidden p-6 md:flex">
 			{#if open}<ShowcaseStory />{/if}
 		</div>
 
 		<div class="flex flex-col justify-between gap-6 p-8 md:p-10">
 			<div class="letter">
-				<Dialog.Title class="font-letter text-[28px] leading-tight font-medium tracking-tight">Build Image Grids Without the Fuss.</Dialog.Title>
+				<Dialog.Title class="font-letter mb-3 text-[36px] leading-[1.1] font-medium tracking-tight text-balance">Build Image Grids Without the Fuss.</Dialog.Title>
 				<p>Hi there! My name’s Thomas Frank, and this is Griddle—a tool for quickly building image grids (and even funky bento grids).</p>
 				<p>
 					Drag in a bunch of images to create a grid automatically, or start with a blank one and add images one by one. When you’re done, you
 					can export to a variety of formats.
 				</p>
 				<p>I built this for my wife so she wouldn’t have to build grids in Photoshop anymore. You get to use it for free, and you don’t even have to marry me.</p>
-				<div class="flex items-center gap-3 pt-1">
+				<div class="flex items-center gap-3 pt-5">
 					<img src={portrait} alt="Thomas Frank" class="size-14 shrink-0 rounded-full object-cover" />
 					<span class="signature" role="img" aria-label="Thomas">{@html signature}</span>
 				</div>

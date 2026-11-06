@@ -24,7 +24,17 @@
 		[0.52, 0.28],
 		[0.45, 0.26]
 	];
-	const CAPTIONS = ['Got it!', 'Up there', 'Look out', 'Over here', 'No way', 'Hmm', 'Ooh', 'Oops', 'Wait'];
+	const CAPTIONS = [
+		'Mars pose',
+		'Not like this',
+		'Strange combo',
+		'What does this button do?',
+		'Unc thumbnail pose',
+		'My reaction to that information',
+		'Noice',
+		"Not Kevin's chili!",
+		'…Donut?'
+	];
 
 	type Cell = [c: number, r: number, w?: number, h?: number];
 	type Layout = { cols: number; rows: number; cells: Cell[]; bg: string; radius: number };
@@ -151,11 +161,11 @@
 	const tiles = $derived.by(() => {
 		if (placed && layout)
 			return placed.boxes.map((b, i) => ({ ...b, rot: 0, pos: focus(i, b), radius: layout.radius, frame: 0 }));
-		const p = step === 'ready' ? pile(108, -40) : step === 'drag' ? pile(50, 46) : pile(50, 50, 0.6);
+		const p = step === 'ready' ? pile(150, -80) : step === 'drag' ? pile(50, 46) : pile(50, 50, 0.6);
 		return p.map((b) => ({ ...b, pos: '50% 50%', radius: 2, frame: 1 }));
 	});
 	const cursor = $derived(
-		step === 'ready' ? { x: 112, y: -22 } : step === 'drag' ? { x: 58, y: 56 } : { x: 60, y: 60 }
+		step === 'ready' ? { x: 160, y: -60 } : step === 'drag' ? { x: 58, y: 56 } : { x: 60, y: 60 }
 	);
 </script>
 
@@ -191,7 +201,7 @@
 			style:transition-delay="{step === 'grid' || step === 'drag' ? i * 30 : i * 18}ms"
 		>
 			<span class="caption" class:show={step === 'captions'} style:transition-delay="{step === 'captions' ? 150 + i * 90 : 0}ms">
-				{CAPTIONS[i]}
+				<span class="clamp">{CAPTIONS[i]}</span>
 			</span>
 		</div>
 	{/each}
@@ -288,15 +298,21 @@
 		padding: 18% 6% 5%;
 		background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
 		color: #fff;
-		font-size: 11px;
+		font-size: 10.5px;
 		font-weight: 500;
 		line-height: 1.2;
-		white-space: nowrap;
 		opacity: 0;
 		transform: translateY(6px);
 		transition:
 			opacity 0.5s var(--ease),
 			transform 0.5s var(--ease);
+	}
+	.clamp {
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
 	}
 	.caption.show {
 		opacity: 1;

@@ -28,6 +28,11 @@ export type TextStyle = {
 	/** Lines kept before the text is cut off with an ellipsis. */
 	lines: number;
 	shadow: TextShadow;
+	/** Weight of plain text (100 to 900); bold runs are drawn heavier. */
+	weight: number;
+	/** Line spacing as a percentage of the font size. */
+	lineHeight: number;
+	align: 'left' | 'center' | 'right';
 };
 
 /** A gradient from the cell's edge behind captions placed inside it. */
@@ -40,24 +45,25 @@ export const DEFAULT_ORDER: Layer[] = ['image', 'fade', 'text'];
 export type CaptionStyle = {
 	on: boolean;
 	order: Layer[];
-	align: 'left' | 'center' | 'right';
 	fade: CaptionFade;
 	title: TextStyle;
 	desc: TextStyle;
 };
+
+/** Default line spacing, as a multiple of the font size. */
+export const LINE_HEIGHT = 1.3;
+const lh = (s: TextStyle) => (s.size * (s.lineHeight || LINE_HEIGHT * 100)) / 100;
 
 const NO_SHADOW: TextShadow = { on: false, strength: 40, distance: 2, softness: 6, color: '#000000' };
 
 export const DEFAULT_CAPTIONS: CaptionStyle = {
 	on: false,
 	order: [...DEFAULT_ORDER],
-	align: 'center',
 	fade: { on: false, color: '#000000', opacity: 55, length: 60 },
-	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, padSide: 16, fit: false, lines: 1, shadow: { ...NO_SHADOW } },
-	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, padSide: 16, fit: false, lines: 2, shadow: { ...NO_SHADOW } }
+	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, padSide: 16, fit: false, lines: 1, shadow: { ...NO_SHADOW }, weight: 400, lineHeight: 130, align: 'center' },
+	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, padSide: 16, fit: false, lines: 2, shadow: { ...NO_SHADOW }, weight: 400, lineHeight: 130, align: 'center' }
 };
 
-export const LINE_HEIGHT = 1.3;
 
 export const isEmpty = (t: RichText | undefined) => !t || t.every((p) => p.every((r) => !r.text.trim()));
 
@@ -88,7 +94,7 @@ export function captionInsets(c: CaptionStyle): { top: number; bottom: number } 
 	return { top: sum(parts(c, 'top')), bottom: sum(parts(c, 'bottom')) };
 }
 
-const blockHeight = (s: TextStyle) => s.padTop + s.padBottom + Math.max(1, s.lines) * s.size * LINE_HEIGHT;
+const blockHeight = (s: TextStyle) => s.padTop + s.padBottom + Math.max(1, s.lines) * lh(s);
 
 /** Space a row needs above and below its images. */
 export function captionBands(c: CaptionStyle): { above: number; below: number } {
@@ -123,15 +129,20 @@ function nearest(variants: string[], weight: number, italic: boolean): string {
 	return best;
 }
 
-/** Loads the weights and styles used by captions from Google Fonts (once per family). */
-export async function loadFont(family: string): Promise<void> {
+/** The plain and bold weights drawn for a caption weight. */
+const boldOf = (weight: number) => Math.max(700, Math.min(900, weight + 300));
+
+/** Loads the weights and styles captions use from Google Fonts (once per family and weight set). */
+export async function loadFont(family: string, weights: number[] = [400]): Promise<void> {
 	if (BUNDLED[family]) return;
-	let p = requested.get(family);
+	const all = [...new Set(weights.flatMap((w) => [w, boldOf(w)]))].sort((a, b) => a - b);
+	const key = `${family}|${all.join(',')}`;
+	let p = requested.get(key);
 	if (!p) {
 		p = (async () => {
 			const entry = (await fontCatalog()).find((f) => f.family === family);
 			const variants = entry?.variants ?? ['400'];
-			const want = new Set([nearest(variants, 400, false), nearest(variants, 700, false), nearest(variants, 400, true), nearest(variants, 700, true)]);
+			const want = new Set(all.flatMap((w) => [nearest(variants, w, false), nearest(variants, w, true)]));
 			const axes = [...want]
 				.map((v) => [v.endsWith('i') ? 1 : 0, parseInt(v)] as const)
 				.sort((a, b) => a[0] - b[0] || a[1] - b[1])
@@ -152,7 +163,7 @@ export async function loadFont(family: string): Promise<void> {
 				)
 			);
 		})();
-		requested.set(family, p);
+		requested.set(key, p);
 	}
 	return p;
 }
@@ -160,10 +171,9 @@ export async function loadFont(family: string): Promise<void> {
 /** Resolves once the fonts the captions use are ready to draw. */
 export async function ensureCaptionFonts(c: CaptionStyle): Promise<void> {
 	if (!c.on) return;
-	const families = new Set<string>();
-	if (c.title.on) families.add(c.title.font);
-	if (c.desc.on) families.add(c.desc.font);
-	await Promise.all([...families].map(loadFont));
+	const families = new Map<string, number[]>();
+	for (const s of [c.title, c.desc]) if (s.on) families.set(s.font, [...(families.get(s.font) ?? []), s.weight || 400]);
+	await Promise.all([...families].map(([f, w]) => loadFont(f, w)));
 	if (BUNDLED.Inter) await document.fonts.load(`400 32px "${BUNDLED.Inter}"`).catch(() => []);
 }
 
@@ -174,7 +184,7 @@ type Piece = Run & { width: number };
 type Line = { pieces: Piece[]; width: number };
 
 const fontFor = (r: Run, s: TextStyle) =>
-	`${r.italic ? 'italic ' : ''}${r.bold ? 700 : 400} ${s.size}px "${cssFamily(s.font)}", system-ui, sans-serif`;
+	`${r.italic ? 'italic ' : ''}${r.bold ? boldOf(s.weight || 400) : s.weight || 400} ${s.size}px "${cssFamily(s.font)}", system-ui, sans-serif`;
 
 /** Breaks runs into lines no wider than `maxW`, cutting the last kept line with an ellipsis. */
 function layoutText(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): Line[] & { cut?: boolean } {
@@ -241,7 +251,7 @@ const FIT_MIN = 6;
 const fitCache = new Map<string, number>();
 /** The largest size up to `s.size` at which the text fits the width in `s.lines` lines. */
 function fitSize(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): number {
-	const key = `${s.font}|${s.size}|${s.lines}|${Math.round(maxW)}|${JSON.stringify(text)}`;
+	const key = `${s.font}|${s.size}|${s.weight}|${s.lines}|${Math.round(maxW)}|${JSON.stringify(text)}`;
 	const hit = fitCache.get(key);
 	if (hit) return hit;
 	const fits = (size: number) => !layoutText(ctx, text, { ...s, size }, maxW).cut;
@@ -261,12 +271,13 @@ function fitSize(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): number {
 	return size;
 }
 
-function drawBlock(ctx: Ctx, text: RichText, style: TextStyle, box: Rect, align: CaptionStyle['align'], scale: number) {
+function drawBlock(ctx: Ctx, text: RichText, style: TextStyle, box: Rect, scale: number) {
+	const align = style.align ?? 'center';
 	const s = style.fit ? { ...style, size: fitSize(ctx, text, style, box.w) } : style;
 	const lines = layoutText(ctx, text, s, box.w);
-	const lh = s.size * LINE_HEIGHT;
+	const lineH = lh(s);
 	// Fitted text that came out smaller sits in the middle of the space kept for it.
-	const dy = style.fit ? Math.max(0, (box.h - lines.length * lh) / 2) : 0;
+	const dy = style.fit ? Math.max(0, (box.h - lines.length * lineH) / 2) : 0;
 	ctx.save();
 	ctx.textBaseline = 'alphabetic';
 	ctx.fillStyle = s.color;
@@ -278,7 +289,7 @@ function drawBlock(ctx: Ctx, text: RichText, style: TextStyle, box: Rect, align:
 	}
 	lines.forEach((line, i) => {
 		let x = box.x + (align === 'left' ? 0 : align === 'right' ? box.w - line.width : (box.w - line.width) / 2);
-		const base = box.y + dy + i * lh + (lh - s.size) / 2 + s.size * 0.8;
+		const base = box.y + dy + i * lineH + (lineH - s.size) / 2 + s.size * 0.8;
 		for (const p of line.pieces) {
 			ctx.font = fontFor(p, s);
 			ctx.fillText(p.text, x, base);
@@ -305,16 +316,16 @@ export function drawCaptions(ctx: Ctx, cells: Rect[], texts: (Captioned | null)[
 		};
 		let y = cell.y;
 		for (const { key, style } of parts(c, 'above')) {
-			const h = style.lines * style.size * LINE_HEIGHT;
+			const h = style.lines * lh(style);
 			y -= style.padBottom + h;
-			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, c.align, scale);
+			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, scale);
 			y -= style.padTop;
 		}
 		y = cell.y + cell.h;
 		for (const { key, style } of parts(c, 'below')) {
-			const h = style.lines * style.size * LINE_HEIGHT;
+			const h = style.lines * lh(style);
 			y += style.padTop;
-			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, c.align, scale);
+			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, scale);
 			y += h + style.padBottom;
 		}
 		const bottom = parts(c, 'bottom');
@@ -324,9 +335,9 @@ export function drawCaptions(ctx: Ctx, cells: Rect[], texts: (Captioned | null)[
 		] as const) {
 			y = start;
 			for (const { key, style } of list) {
-				const h = style.lines * style.size * LINE_HEIGHT;
+				const h = style.lines * lh(style);
 				y += style.padTop;
-				if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, c.align, scale);
+				if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, scale);
 				y += h + style.padBottom;
 			}
 		}
