@@ -147,3 +147,10 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+node_modules
+dist
+dist-single
+.wrangler
+.DS_Store
+*.local
+Sample Images/
