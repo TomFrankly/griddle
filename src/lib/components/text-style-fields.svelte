@@ -6,6 +6,10 @@
 	import { slide } from 'svelte/transition';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
+	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
+	import AlignLeftIcon from '@lucide/svelte/icons/align-left';
+	import AlignCenterIcon from '@lucide/svelte/icons/align-center';
+	import AlignRightIcon from '@lucide/svelte/icons/align-right';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import FontPicker from './font-picker.svelte';
 	import SliderField from './slider-field.svelte';
@@ -37,6 +41,22 @@
 				<FontPicker bind:value={value.font} label="{title} font" />
 			</div>
 			<SliderField label={value.fit ? 'Max size' : 'Size'} bind:value={value.size} min={8} max={maxSize} />
+			<SliderField label="Weight" bind:value={value.weight} min={100} max={900} step={100} unit="" />
+			<div class="flex items-center justify-between">
+				<span class="text-sm">Align</span>
+				<ToggleGroup.Root
+					type="single"
+					variant="outline"
+					size="sm"
+					value={value.align}
+					onValueChange={(v) => v && (value.align = v as TextStyle['align'])}
+					data-testid="{id}-align"
+				>
+					<ToggleGroup.Item value="left" aria-label="{title} align left"><AlignLeftIcon /></ToggleGroup.Item>
+					<ToggleGroup.Item value="center" aria-label="{title} align center"><AlignCenterIcon /></ToggleGroup.Item>
+					<ToggleGroup.Item value="right" aria-label="{title} align right"><AlignRightIcon /></ToggleGroup.Item>
+				</ToggleGroup.Root>
+			</div>
 			<label class="flex cursor-pointer items-center justify-between" for="{id}-fit">
 				<span class="flex items-center gap-1.5 text-sm">
 					Fit text
@@ -62,6 +82,7 @@
 			{#if more}
 				<div class="space-y-3" transition:slide={{ duration: 150 }}>
 					<ColorField label="Color" bind:value={value.color} />
+					<SliderField label="Line height" bind:value={value.lineHeight} min={80} max={240} step={5} unit="%" />
 					<div class="flex items-center justify-between">
 						<span class="text-sm">Position</span>
 						<Select.Root type="single" value={value.position} onValueChange={(v) => v && (value.position = v as TextStyle['position'])}>

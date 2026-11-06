@@ -55,9 +55,6 @@
 	import { captionBands, ensureCaptionFonts, fromPlain, plainText } from '$lib/captions';
 	import TextStyleFields from '$lib/components/text-style-fields.svelte';
 	import LooksMenu from '$lib/components/looks-menu.svelte';
-	import AlignLeftIcon from '@lucide/svelte/icons/align-left';
-	import AlignCenterIcon from '@lucide/svelte/icons/align-center';
-	import AlignRightIcon from '@lucide/svelte/icons/align-right';
 	import { applyLook, scaleStyle, withDefaults, type Look } from '$lib/looks';
 	import { loadBackground, loadFiles, loadSettings, saveBackground, saveSettings, storeFile, syncFiles } from '$lib/persist';
 	import {
@@ -1614,20 +1611,6 @@
 							<InfoTip text="Hover an image in the preview and click the text button to write its title and description." />
 						</span>
 						<Button variant="outline" size="sm" onclick={useFileNames} disabled={!images.length}>Use file names</Button>
-					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-sm">Align</span>
-						<ToggleGroup.Root
-							type="single"
-							variant="outline"
-							size="sm"
-							value={style.captions.align}
-							onValueChange={(v) => v && (style.captions.align = v as typeof style.captions.align)}
-						>
-							<ToggleGroup.Item value="left" aria-label="Align left"><AlignLeftIcon /></ToggleGroup.Item>
-							<ToggleGroup.Item value="center" aria-label="Align center"><AlignCenterIcon /></ToggleGroup.Item>
-							<ToggleGroup.Item value="right" aria-label="Align right"><AlignRightIcon /></ToggleGroup.Item>
-						</ToggleGroup.Root>
 					</div>
 					{#if ['top', 'bottom'].includes(style.captions.title.position) || ['top', 'bottom'].includes(style.captions.desc.position)}
 						<div class="space-y-4 border-l pl-3" transition:slide={{ duration: 150 }}>
