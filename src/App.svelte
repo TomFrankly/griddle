@@ -122,8 +122,9 @@
 	type Upload = { bitmap: ImageBitmap; url: string; name: string; file: File };
 	let bgImage = $state<Upload | null>(null);
 	let cellImage = $state<Upload | null>(null);
-	// A green cell background behind the keyed-out sample photos on a first visit.
-	let style = $state<CellStyle>({ ...structuredClone(DEFAULT_STYLE), fill: { ...DEFAULT_STYLE.fill, on: true, bgId: 'custom', color: '#1ea546' } });
+	// The keyed-out sample photos sit on a green cell background.
+	const SAMPLE_FILL = { on: true, bgId: 'custom', color: '#1ccd50' };
+	let style = $state<CellStyle>({ ...structuredClone(DEFAULT_STYLE), fill: { ...DEFAULT_STYLE.fill, ...SAMPLE_FILL } });
 	let size = $state('1920');
 	let customSize = $state(3000);
 	let autoLayout = $state(true);
@@ -1079,6 +1080,7 @@
 	});
 
 	async function loadSamples() {
+		style.fill = { ...style.fill, ...SAMPLE_FILL };
 		await addFiles(await exampleFiles(), true);
 	}
 
