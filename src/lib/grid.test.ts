@@ -73,7 +73,7 @@ describe('placeImage', () => {
 	const cell = { x: 0, y: 0, w: 100, h: 100 };
 	it('covers the cell, centered, for fill', () => {
 		const r = placeImage(400, 200, cell, 'fill');
-		expect(r).toMatchObject({ x: -50, y: 0, w: 200, h: 100, slackX: 100, slackY: 0 });
+		expect(r).toMatchObject({ x: -50, y: 0, w: 200, h: 100 });
 	});
 	it('letterboxes inside the cell for fit', () => {
 		const r = placeImage(400, 200, cell, 'fit');
@@ -196,21 +196,29 @@ describe('zooming out a filled image', () => {
 		expect(placeImage(100, 100, cell, 'fit', { zoom: 0.25, ox: 0, oy: 0 }).h).toBeCloseTo(25);
 	});
 	it('moves a shrunken image anywhere inside its cell', () => {
-		const left = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: -1, oy: 0 });
+		const left = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: 1, oy: 0 });
 		expect(left.x).toBeCloseTo(0);
-		const right = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: 1, oy: 1 });
+		const right = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: -1, oy: -1 });
 		expect(right.x + right.w).toBeCloseTo(200);
 		expect(right.y + right.h).toBeCloseTo(100);
-		const top = placeImage(100, 100, cell, 'fill', { zoom: 0.25, ox: 0, oy: -1 });
+		const top = placeImage(100, 100, cell, 'fill', { zoom: 0.25, ox: 0, oy: 1 });
 		expect(top.y).toBeCloseTo(0);
 	});
 	it('moves a free image until only a sliver still overlaps the cell', () => {
 		const sq = { x: 0, y: 0, w: 100, h: 100 };
-		expect(placeImage(100, 100, sq, 'fill', { zoom: 1, ox: 1, oy: 0 }).x).toBe(0);
-		const moved = placeImage(100, 100, sq, 'fill', { zoom: 1, ox: 1, oy: -1 }, true);
+		expect(placeImage(100, 100, sq, 'fill', { zoom: 1, ox: -1, oy: 0 }).x).toBe(0);
+		const moved = placeImage(100, 100, sq, 'fill', { zoom: 1, ox: -1, oy: 1 }, true);
 		expect(moved.x).toBeCloseTo(80);
 		expect(moved.y).toBeCloseTo(-80);
-		const big = placeImage(100, 100, sq, 'fill', { zoom: 2, ox: -1, oy: 0 }, true);
+		const big = placeImage(100, 100, sq, 'fill', { zoom: 2, ox: 1, oy: 0 }, true);
 		expect(big.x + big.w).toBeCloseTo(30);
+	});
+	it('keeps an image in place when free is switched, as long as it fits both ways', () => {
+		const sq = { x: 0, y: 0, w: 100, h: 100 };
+		const adj = { zoom: 1.6, ox: 0.2, oy: -0.1 };
+		const a = placeImage(300, 200, sq, 'fill', adj, false);
+		const b = placeImage(300, 200, sq, 'fill', adj, true);
+		expect(b.x).toBeCloseTo(a.x);
+		expect(b.y).toBeCloseTo(a.y);
 	});
 });
