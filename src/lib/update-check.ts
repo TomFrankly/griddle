@@ -1,6 +1,7 @@
 /**
  * Notices when a newer build has been deployed, by comparing this build's id with the one in
- * /version.json. Checks when the tab comes back into view and every 15 minutes while open.
+ * /version.json. Checks when the tab comes back into view or the window gets focus, and every
+ * two minutes while open.
  */
 export function watchForUpdates(onUpdate: () => void): () => void {
 	const current = import.meta.env.VITE_BUILD_ID as string | undefined;
@@ -8,7 +9,7 @@ export function watchForUpdates(onUpdate: () => void): () => void {
 	let found = false;
 	let last = 0;
 	const check = async () => {
-		if (found || Date.now() - last < 60_000) return;
+		if (found || Date.now() - last < 20_000) return;
 		last = Date.now();
 		try {
 			const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
@@ -24,10 +25,12 @@ export function watchForUpdates(onUpdate: () => void): () => void {
 	};
 	const onVisible = () => document.visibilityState === 'visible' && check();
 	document.addEventListener('visibilitychange', onVisible);
-	const timer = setInterval(check, 15 * 60_000);
+	window.addEventListener('focus', check);
+	const timer = setInterval(check, 2 * 60_000);
 	const first = setTimeout(check, 10_000);
 	return () => {
 		document.removeEventListener('visibilitychange', onVisible);
+		window.removeEventListener('focus', check);
 		clearInterval(timer);
 		clearTimeout(first);
 	};
