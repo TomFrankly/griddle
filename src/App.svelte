@@ -16,6 +16,9 @@
 	import Stepper from '$lib/components/stepper.svelte';
 	import ColorPicker from '$lib/components/color-picker.svelte';
 	import CellOverlay from '$lib/components/cell-overlay.svelte';
+	import ToggleSection from '$lib/components/toggle-section.svelte';
+	import SliderField from '$lib/components/slider-field.svelte';
+	import ColorField from '$lib/components/color-field.svelte';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import CopyIcon from '@lucide/svelte/icons/copy';
@@ -36,7 +39,9 @@
 		drawGrid,
 		loadImage,
 		renderFull,
+		DEFAULT_STYLE,
 		type Background,
+		type CellStyle,
 		type ExportFormat,
 		type FitMode,
 		type GridImage
@@ -79,6 +84,7 @@
 	let bgId = $state('white');
 	let customColor = $state('#f4f1ea');
 	let bgImage = $state<{ bitmap: ImageBitmap; url: string; name: string } | null>(null);
+	let style = $state<CellStyle>(structuredClone(DEFAULT_STYLE));
 	let size = $state('1920');
 	let customSize = $state(3000);
 
@@ -142,7 +148,7 @@
 				const adjust = { zoom: img.adjust.zoom, ox: img.adjust.ox, oy: img.adjust.oy };
 				return { source: img.thumb, width: img.width, height: img.height, adjust };
 			},
-			{ background, fit, scale: w / layout.width }
+			{ background, fit, style, scale: w / layout.width }
 		);
 	});
 
@@ -223,7 +229,7 @@
 		if (!images.length || busy) return;
 		busy = true;
 		try {
-			const full = await renderFull(layout, images, { background, fit, opaque: format === 'jpeg' });
+			const full = await renderFull(layout, images, { background, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
 			const blob = await canvasToBlob(full, format);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
@@ -249,7 +255,7 @@
 		busy = true;
 		try {
 			// Hand the clipboard a promise so Safari keeps the click's permission while we render.
-			const blob = renderFull(layout, images, { background, fit }).then((c) => canvasToBlob(c, 'png'));
+			const blob = renderFull(layout, images, { background, fit, style: $state.snapshot(style) }).then((c) => canvasToBlob(c, 'png'));
 			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
 			toast.success('Copied to clipboard');
 		} catch (e) {
@@ -496,6 +502,25 @@
 					</div>
 				</section>
 
+				<ToggleSection title="Rounded corners" bind:on={style.corners.on}>
+					<SliderField label="Radius" bind:value={style.corners.radius} unit="%" />
+				</ToggleSection>
+				<ToggleSection title="Border" bind:on={style.border.on}>
+					<SliderField label="Width" bind:value={style.border.width} min={1} max={Math.max(20, Math.round(longEdge / 40))} />
+					<ColorField label="Color" bind:value={style.border.color} />
+					<SliderField label="Opacity" bind:value={style.border.opacity} unit="%" />
+				</ToggleSection>
+				<ToggleSection title="Drop shadow" bind:on={style.shadow.on}>
+					<SliderField label="Strength" bind:value={style.shadow.strength} unit="%" />
+					<SliderField label="Distance" bind:value={style.shadow.distance} max={spaceMax} />
+					<SliderField label="Softness" bind:value={style.shadow.softness} max={spaceMax * 2} />
+				</ToggleSection>
+				<ToggleSection title="Divider lines" bind:on={style.lines.on}>
+					<SliderField label="Thickness" bind:value={style.lines.width} min={1} max={Math.max(20, Math.round(longEdge / 60))} />
+					<ColorField label="Color" bind:value={style.lines.color} />
+					<SliderField label="Opacity" bind:value={style.lines.opacity} unit="%" />
+				</ToggleSection>
+
 				<section class="space-y-3 border-b p-4">
 					<h2 class="text-muted-foreground text-xs font-medium">Background</h2>
 					<div class="swatches">
@@ -612,7 +637,13 @@
 							<canvas bind:this={canvas} class="checker absolute inset-0 size-full" data-testid="preview"></canvas>
 							{#each displayCells as rect, i (images[i]?.id ?? i)}
 								{#if images[i]}
-									<CellOverlay {rect} image={images[i]} {fit} index={i} />
+									<CellOverlay
+										{rect}
+										image={images[i]}
+										{fit}
+										index={i}
+										radius={style.corners.on ? (style.corners.radius / 100) * (Math.min(rect.w, rect.h) / 2) : 0}
+									/>
 								{/if}
 							{/each}
 						</div>

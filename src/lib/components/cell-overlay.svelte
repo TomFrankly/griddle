@@ -8,7 +8,13 @@
 	import { placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
 	import type { FitMode, GridImage } from '$lib/render';
 
-	let { rect, image, fit, index }: { rect: Rect; image: GridImage; fit: FitMode; index: number } = $props();
+	let {
+		rect,
+		image,
+		fit,
+		index,
+		radius = 0
+	}: { rect: Rect; image: GridImage; fit: FitMode; index: number; radius?: number } = $props();
 
 	let dragging = $state(false);
 	const place = $derived(placeImage(image.width, image.height, rect, fit, image.adjust));
@@ -18,6 +24,8 @@
 
 	function onPointerDown(e: PointerEvent) {
 		if (e.button !== 0 || !movable) return;
+		// The zoom slider and reset button handle their own pointer events.
+		if ((e.target as Element).closest('[data-cell-control]')) return;
 		const el = e.currentTarget as HTMLElement;
 		el.setPointerCapture(e.pointerId);
 		dragging = true;
@@ -84,24 +92,25 @@
 >
 	<div
 		class="pointer-events-none absolute inset-0 opacity-0 ring-1 ring-white/70 ring-inset transition-opacity group-hover/cell:opacity-100"
+		style:border-radius="{radius}px"
 		class:opacity-100={dragging}
 	></div>
 	{#if rect.w >= 72 && rect.h >= 48}
 		<button
 			type="button"
-			class="bg-background/90 text-foreground hover:bg-background absolute top-1.5 right-1.5 flex size-6 items-center justify-center opacity-0 shadow-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 disabled:hidden"
+			class="bg-background/70 text-foreground hover:bg-background/90 absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 disabled:hidden"
 			aria-label="Reset image {index + 1}"
 			title="Reset"
 			disabled={!adjusted}
 			data-testid="cell-reset"
-			onpointerdown={(e) => e.stopPropagation()}
+			data-cell-control
 			onclick={reset}
 		>
 			<RotateCcwIcon class="size-3.5" />
 		</button>
 		<div
-			class="bg-background/90 absolute inset-x-1.5 bottom-1.5 flex h-7 items-center px-2.5 opacity-0 shadow-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
-			onpointerdown={(e) => e.stopPropagation()}
+			class="bg-background/70 absolute inset-x-2 bottom-2 flex h-7 items-center rounded-full px-3 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
+			data-cell-control
 			role="presentation"
 		>
 			<Slider
