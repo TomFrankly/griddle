@@ -11,6 +11,8 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { FILE_EXT, safeFileName } from '$lib/file-name';
+	import { canSaveAs, pickSaveFile, writeFile } from '$lib/save-as';
+	import FolderDownIcon from '@lucide/svelte/icons/folder-down';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
@@ -924,18 +926,32 @@
 		setTimeout(() => URL.revokeObjectURL(url), 10_000);
 	}
 
-	async function download(format: ExportFormat | 'psd') {
+	async function download(format: ExportFormat | 'psd', saveAs = false) {
 		if (!images.length || busy) return;
-		busy = true;
-		try {
-			if (format === 'psd') {
-				const blob = await renderPsd(layout, images, { background, cellBackground, fit, style: $state.snapshot(style) as CellStyle });
-				save(blob, fileName(FILE_EXT.psd));
+		const name = fileName(FILE_EXT[format]);
+		let handle: FileSystemFileHandle | null = null;
+		if (saveAs) {
+			try {
+				handle = await pickSaveFile(name, FILE_EXT[format]);
+			} catch (e) {
+				toast.error(e instanceof Error ? e.message : 'Could not open the save window');
 				return;
 			}
-			const full = await renderFull(layout, images, { background, cellBackground, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
-			const blob = await canvasToBlob(full, format, quality / 100);
-			save(blob, fileName(FILE_EXT[format]));
+			if (!handle) return;
+		}
+		busy = true;
+		try {
+			let blob: Blob;
+			if (format === 'psd') {
+				blob = await renderPsd(layout, images, { background, cellBackground, fit, style: $state.snapshot(style) as CellStyle });
+			} else {
+				const full = await renderFull(layout, images, { background, cellBackground, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
+				blob = await canvasToBlob(full, format, quality / 100);
+			}
+			if (handle) {
+				await writeFile(handle, blob);
+				toast.success(`Saved ${handle.name}`);
+			} else save(blob, name);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Export failed');
 		} finally {
@@ -1789,10 +1805,28 @@
 					{#if exportFormat === 'psd'}
 						<p class="text-muted-foreground text-sm">Each image, caption and line on its own layer.</p>
 					{/if}
-					<Button class="w-full" onclick={() => download(exportFormat)} disabled={!images.length || busy} data-testid="download">
-						{#if busy}<LoaderIcon class="animate-spin" />{:else}<DownloadIcon />{/if}
-						Download {FORMATS.find((f) => f.id === exportFormat)?.label}
-					</Button>
+					<div class="flex gap-2">
+						<Button class="flex-1" onclick={() => download(exportFormat)} disabled={!images.length || busy} data-testid="download">
+							{#if busy}<LoaderIcon class="animate-spin" />{:else}<DownloadIcon />{/if}
+							Download {FORMATS.find((f) => f.id === exportFormat)?.label}
+						</Button>
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								{#snippet child({ props })}
+									<span {...props} class="inline-flex" tabindex={canSaveAs ? -1 : 0}>
+										<Button variant="outline" onclick={() => download(exportFormat, true)} disabled={!canSaveAs || !images.length || busy} data-testid="save-as">
+											<FolderDownIcon />Save as…
+										</Button>
+									</span>
+								{/snippet}
+							</Tooltip.Trigger>
+							<Tooltip.Content class="max-w-64">
+								{canSaveAs
+									? 'Choose the folder and file name.'
+									: 'This browser doesn’t let websites open a Save As window. Chrome, Edge and Arc do. Download saves to your downloads folder.'}
+							</Tooltip.Content>
+						</Tooltip.Root>
+					</div>
 					<Button variant="outline" class="w-full" onclick={copy} disabled={!images.length || busy} data-testid="copy">
 						<CopyIcon />
 						Copy to clipboard
