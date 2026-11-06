@@ -69,3 +69,10 @@ export async function exampleFiles(): Promise<File[]> {
 		})
 	);
 }
+
+/** URLs of the bundled example photos, in order, for small previews. */
+export function exampleUrls(): string[] {
+	return Object.entries(bundled)
+		.sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+		.map(([, url]) => url);
+}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { slide } from 'svelte/transition';
-	import { exampleFiles } from '$lib/examples';
+	import { exampleFiles, exampleUrls } from '$lib/examples';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { ModeWatcher, setMode, userPrefersMode } from 'mode-watcher';
@@ -35,6 +35,8 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import InfoDialogs from '$lib/components/info-dialogs.svelte';
+	import StartPanel from '$lib/components/start-panel.svelte';
+	import WelcomeLetter from '$lib/components/welcome-letter.svelte';
 	import ArrowLeftRightIcon from '@lucide/svelte/icons/arrow-left-right';
 	import LocateFixedIcon from '@lucide/svelte/icons/locate-fixed';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
@@ -79,7 +81,6 @@
 	} from '$lib/render';
 	import { fillSlots } from '$lib/slots';
 	import SquarePlusIcon from '@lucide/svelte/icons/square-plus';
-	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import { PAINT_PRESETS } from '$lib/paint/presets';
 
 	const ASPECTS = [
@@ -357,6 +358,16 @@
 		target.addEventListener('pointercancel', up);
 	}
 	let infoOpen = $state<'help' | 'privacy' | null>(null);
+	const WELCOMED = 'griddle:welcomed';
+	let letterOpen = $state(false);
+	$effect(() => {
+		if (!letterOpen) return;
+		try {
+			localStorage.setItem(WELCOMED, '1');
+		} catch {
+			// Without storage the letter may show again next time.
+		}
+	});
 	let paneList = $state<HTMLDivElement>();
 	/** Scrolls the side panel to an image's row, about 30% down, and flashes it. */
 	function revealInPane(id: string) {
@@ -801,9 +812,12 @@
 		showingExamples = false;
 	}
 	/** A grid of empty slots to plan the layout before adding any images. */
-	function startEmpty() {
+	function startEmpty(c = cols, r = rows) {
 		if (showingExamples) clearAll();
-		addSlots(Math.max(1, cols * rows));
+		autoLayout = false;
+		cols = c;
+		rows = r;
+		addSlots(Math.max(1, c * r));
 	}
 	/** Takes the image out of a cell but keeps the cell, with its size and captions. */
 	function clearImage(i: number) {
@@ -1194,8 +1208,12 @@
 		} catch {
 			resumed = false;
 		}
-		if (!resumed && !images.length) await addFiles(await exampleFiles(), true);
 		resetHistory();
+		try {
+			letterOpen = !localStorage.getItem(WELCOMED);
+		} catch {
+			letterOpen = false;
+		}
 	});
 
 	$effect(() => {
@@ -1215,6 +1233,7 @@
 <ModeWatcher />
 <Toaster position="bottom-center" />
 <InfoDialogs bind:open={infoOpen} />
+<WelcomeLetter bind:open={letterOpen} />
 
 {#snippet dockHeader()}
 	<div class="flex h-9 items-center gap-1 border-b px-3">
@@ -1441,6 +1460,7 @@
 						{/snippet}
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content align="end" class="w-40">
+						<DropdownMenu.Item onclick={() => (letterOpen = true)} data-testid="info-welcome">Welcome letter</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => (infoOpen = 'help')} data-testid="info-help">Help</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => (infoOpen = 'privacy')} data-testid="info-privacy">Privacy</DropdownMenu.Item>
 					</DropdownMenu.Content>
@@ -1449,7 +1469,7 @@
 		</header>
 
 		<div class="flex flex-col-reverse md:min-h-0 md:flex-1 md:flex-row">
-			<aside class="shrink-0 border-t md:w-80 md:overflow-y-auto md:border-t-0 md:border-r">
+			<aside class="shrink-0 border-t md:w-80 md:overflow-y-auto md:border-t-0 md:border-r" class:hidden={!images.length}>
 				<section class="space-y-3 border-b p-4">
 					<div class="flex items-center justify-between">
 						<h2 class="text-muted-foreground text-xs font-medium">Grid</h2>
@@ -1700,8 +1720,8 @@
 				{#if showingExamples && !welcomeDismissed}
 					<div class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2.5" data-testid="welcome">
 						<p class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm">
-							<span class="font-medium">Welcome to <span class="font-logo text-lg leading-none italic">Griddle!</span></span>
-							<span class="text-muted-foreground">Drag in images to replace these samples, or start from scratch.</span>
+							<span class="font-medium">This is the sample grid.</span>
+							<span class="text-muted-foreground">Drag in images to replace it, or start from scratch.</span>
 						</p>
 						<div class="flex items-center gap-1">
 							<Button size="sm" variant="outline" onclick={clearAll} data-testid="start-scratch">Start from scratch</Button>
@@ -1712,7 +1732,7 @@
 				<div
 					bind:clientWidth={stageW}
 					bind:clientHeight={stageH}
-					class="bg-accent relative flex h-[62svh] items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
+					class="bg-accent relative flex {images.length ? 'h-[62svh]' : 'h-[calc(100svh-49px)]'} items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
 					{#if images.length}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1845,33 +1865,21 @@
 							{/if}
 						{/if}
 					{:else}
-						<div class="flex flex-col items-center gap-3">
-							<button
-								type="button"
-								class="hover:bg-background/60 flex flex-col items-center gap-3 border px-16 py-14 text-center transition-colors"
-								onclick={() => fileInput.click()}
-							>
-								<ImagePlusIcon class="text-muted-foreground size-6" />
-								<span class="text-sm font-medium">Drop images here</span>
-								<span class="text-muted-foreground text-xs">or click to choose</span>
-							</button>
-							<div class="flex gap-1">
-								<Tooltip.Root>
-									<Tooltip.Trigger>
-										{#snippet child({ props })}
-											<Button {...props} variant="ghost" size="sm" onclick={startEmpty} data-testid="start-empty">
-												<LayoutGridIcon />Start with empty slots
-											</Button>
-										{/snippet}
-									</Tooltip.Trigger>
-									<Tooltip.Content>Lay out a {cols} × {rows} grid first, then drop images into it</Tooltip.Content>
-								</Tooltip.Root>
-								<Button variant="ghost" size="sm" onclick={loadSamples} disabled={loading > 0} data-testid="load-samples">Load samples</Button>
+						<StartPanel
+							{cols}
+							{rows}
+							previews={exampleUrls()}
+							disabled={loading > 0}
+							onchoose={() => fileInput.click()}
+							onempty={startEmpty}
+							onsample={loadSamples}
+						>
+							{#snippet extra()}
 								{#if DEV}
 									<Button variant="ghost" size="sm" onclick={loadPokemon} disabled={loading > 0} data-testid="load-pokemon">Load 25 Pokémon</Button>
 								{/if}
-							</div>
-						</div>
+							{/snippet}
+						</StartPanel>
 					{/if}
 					{#if loading}
 						<div class="bg-background absolute top-3 right-3 flex items-center gap-2 border px-2.5 py-1 text-xs">
