@@ -22,6 +22,7 @@
 
 	let {
 		rect,
+		area,
 		image,
 		fit,
 		index,
@@ -35,6 +36,8 @@
 		lifted = false
 	}: {
 		rect: Rect;
+		/** Where the image may sit inside the cell, when that is smaller than the cell. */
+		area?: Rect;
 		image: GridImage;
 		fit: FitMode;
 		index: number;
@@ -121,8 +124,9 @@
 		e.stopPropagation();
 		onfiles(e.dataTransfer.files);
 	}
-	const place = $derived(placeImage(image.width, image.height, rect, fit, image.adjust));
-	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, rect, fit) * 100) / 100);
+	const box = $derived(area ?? rect);
+	const place = $derived(placeImage(image.width, image.height, box, fit, image.adjust));
+	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
 	const movable = $derived(place.slackX > 0.5 || place.slackY > 0.5);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
 	const clamp = (n: number) => Math.min(1, Math.max(-1, n));

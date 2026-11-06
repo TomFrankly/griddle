@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import { slide } from 'svelte/transition';
 	import { exampleFiles } from '$lib/examples';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
@@ -60,6 +61,7 @@
 		renderFull,
 		renderPsd,
 		renderCells,
+		imageArea,
 		DEFAULT_STYLE,
 		type Background,
 		type CellStyle,
@@ -323,6 +325,12 @@
 	const k = $derived(preview.w / layout.width);
 	const displayCells = $derived(
 		layout.cells.map((c) => ({ x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k }))
+	);
+	const displayAreas = $derived(
+		layout.cells.map((c) => {
+			const a = imageArea(c, style);
+			return { x: a.x * k, y: a.y * k, w: a.w * k, h: a.h * k };
+		})
 	);
 
 	$effect(() => {
@@ -1387,6 +1395,40 @@
 							<ToggleGroup.Item value="right" aria-label="Align right"><AlignRightIcon /></ToggleGroup.Item>
 						</ToggleGroup.Root>
 					</div>
+					{#if ['top', 'bottom'].includes(style.captions.title.position) || ['top', 'bottom'].includes(style.captions.desc.position)}
+						<div class="space-y-4 border-l pl-3" transition:slide={{ duration: 150 }}>
+							<div class="flex items-center justify-between">
+								<span class="flex items-center gap-1.5 text-sm">
+									Inside text
+									<InfoTip text="Push makes room for text inside the cell by shrinking the image. Overlay puts the text over the image." />
+								</span>
+								<ToggleGroup.Root
+									type="single"
+									variant="outline"
+									size="sm"
+									value={style.captions.overlay ? 'overlay' : 'push'}
+									onValueChange={(v) => v && (style.captions.overlay = v === 'overlay')}
+								>
+									<ToggleGroup.Item value="push" class="px-3" data-testid="caption-push">Push</ToggleGroup.Item>
+									<ToggleGroup.Item value="overlay" class="px-3" data-testid="caption-overlay">Overlay</ToggleGroup.Item>
+								</ToggleGroup.Root>
+							</div>
+							<label class="flex cursor-pointer items-center justify-between" for="caption-fade">
+								<span class="flex items-center gap-1.5 text-sm">
+									Fade behind text
+									<InfoTip text="A gradient from the cell's edge that sits behind inside text, so it stays readable over busy images." />
+								</span>
+								<Switch id="caption-fade" bind:checked={style.captions.fade.on} size="sm" />
+							</label>
+							{#if style.captions.fade.on}
+								<div class="space-y-4" transition:slide={{ duration: 150 }}>
+									<ColorField label="Fade color" bind:value={style.captions.fade.color} />
+									<SliderField label="Fade opacity" bind:value={style.captions.fade.opacity} unit="%" />
+									<SliderField label="Fade length" bind:value={style.captions.fade.length} max={Math.max(200, spaceMax * 2)} />
+								</div>
+							{/if}
+						</div>
+					{/if}
 					<TextStyleFields title="Title" bind:value={style.captions.title} maxSize={Math.max(80, Math.round(longEdge / 12))} />
 					<TextStyleFields title="Description" bind:value={style.captions.desc} maxSize={Math.max(60, Math.round(longEdge / 16))} />
 				</ToggleSection>
@@ -1476,6 +1518,7 @@
 								{#if images[i]}
 									<CellOverlay
 										{rect}
+										area={displayAreas[i]}
 										image={images[i]}
 										{fit}
 										index={i}

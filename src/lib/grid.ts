@@ -216,15 +216,18 @@ export const DEFAULT_ADJUST: Adjust = { zoom: 1, ox: 0, oy: 0 };
 
 export const ZOOM_MAX = 5;
 
+/** How far below the whole-image size an image can shrink inside its cell. */
+export const ZOOM_OUT = 0.25;
+
 /**
- * The smallest zoom for an image in a cell. Filled images can zoom out until the whole image
- * shows; fitted images already show it all.
+ * The smallest zoom for an image in a cell: down to a quarter of the size at which the whole
+ * image shows. For filled images that is well below 100%.
  */
 export function minZoom(imgW: number, imgH: number, cell: { w: number; h: number }, mode: 'fill' | 'fit'): number {
-	if (mode !== 'fill') return 1;
+	if (mode !== 'fill') return ZOOM_OUT;
 	const cover = Math.max(cell.w / imgW, cell.h / imgH);
 	const contain = Math.min(cell.w / imgW, cell.h / imgH);
-	return cover > 0 ? Math.min(1, contain / cover) : 1;
+	return cover > 0 ? Math.min(1, contain / cover) * ZOOM_OUT : ZOOM_OUT;
 }
 
 /** Where an image is drawn so it covers (fill) or fits inside (fit) a cell, after zoom and pan. */

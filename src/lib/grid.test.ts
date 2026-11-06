@@ -94,7 +94,7 @@ describe('placeImage', () => {
 		expect(corner.y + corner.h).toBe(100);
 	});
 	it('clamps zoom to the allowed range', () => {
-		expect(placeImage(100, 100, cell, 'fill', { zoom: 0.2, ox: 0, oy: 0 }).w).toBe(100);
+		expect(placeImage(100, 100, cell, 'fill', { zoom: 0.1, ox: 0, oy: 0 }).w).toBe(25);
 		expect(placeImage(100, 100, cell, 'fill', { zoom: 99, ox: 0, oy: 0 }).w).toBe(500);
 	});
 });
@@ -180,18 +180,19 @@ describe('randomSpans', () => {
 
 describe('zooming out a filled image', () => {
 	const cell = { x: 0, y: 0, w: 200, h: 100 };
-	it('lets a filled image shrink until all of it shows', () => {
-		expect(minZoom(100, 100, cell, 'fill')).toBeCloseTo(0.5);
+	it('lets a filled image shrink until all of it shows, and further', () => {
+		expect(minZoom(100, 100, cell, 'fill')).toBeCloseTo(0.125);
 		const p = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: 0, oy: 0 });
 		expect(p.h).toBeCloseTo(100);
 		expect(p.w).toBeCloseTo(100);
 		expect(p.x).toBeCloseTo(50);
 	});
-	it('stops at the whole image', () => {
-		const p = placeImage(100, 100, cell, 'fill', { zoom: 0.1, ox: 0, oy: 0 });
-		expect(p.h).toBeCloseTo(100);
+	it('stops at a quarter of the whole image', () => {
+		const p = placeImage(100, 100, cell, 'fill', { zoom: 0.01, ox: 0, oy: 0 });
+		expect(p.h).toBeCloseTo(25);
 	});
-	it('does not change fitted images', () => {
-		expect(minZoom(100, 100, cell, 'fit')).toBe(1);
+	it('lets fitted images shrink to a quarter', () => {
+		expect(minZoom(100, 100, cell, 'fit')).toBe(0.25);
+		expect(placeImage(100, 100, cell, 'fit', { zoom: 0.25, ox: 0, oy: 0 }).h).toBeCloseTo(25);
 	});
 });

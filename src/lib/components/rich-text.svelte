@@ -68,7 +68,7 @@
 	let host: HTMLDivElement;
 	let wrap: HTMLDivElement;
 	let view: EditorView | undefined;
-	let bar = $state<{ x: number; y: number } | null>(null);
+	let bar = $state<{ x: number; y: number; below: boolean } | null>(null);
 	let active = $state<Record<MarkName, boolean>>({ bold: false, italic: false, underline: false, strike: false });
 	let empty = $state(true);
 	let lastEmitted = '';
@@ -90,7 +90,20 @@
 		const a = view.coordsAtPos(sel.from);
 		const b = view.coordsAtPos(sel.to);
 		const box = wrap.getBoundingClientRect();
-		bar = { x: (a.left + b.right) / 2 - box.left, y: Math.min(a.top, b.top) - box.top };
+		// Show the bar below the text when a scrolling panel would cut it off above.
+		const top = Math.min(a.top, b.top);
+		let limit = 0;
+		for (let el = wrap.parentElement; el; el = el.parentElement) {
+			const o = getComputedStyle(el).overflowY;
+			if (o === 'auto' || o === 'scroll' || o === 'hidden') {
+				limit = el.getBoundingClientRect().top;
+				break;
+			}
+		}
+		const below = top - 44 < limit;
+		bar = below
+			? { x: (a.left + b.right) / 2 - box.left, y: Math.max(a.bottom, b.bottom) - box.top, below }
+			: { x: (a.left + b.right) / 2 - box.left, y: top - box.top, below };
 	}
 
 	function command(name: MarkName) {
@@ -173,9 +186,9 @@
 	{/if}
 	{#if bar}
 		<div
-			class="bg-popover text-popover-foreground absolute z-50 flex -translate-x-1/2 -translate-y-full items-center gap-0.5 rounded-md border p-0.5 shadow-md"
+			class="bg-popover text-popover-foreground absolute z-50 flex -translate-x-1/2 items-center gap-0.5 rounded-md border p-0.5 shadow-md {bar.below ? '' : '-translate-y-full'}"
 			style:left="{bar.x}px"
-			style:top="{bar.y - 6}px"
+			style:top="{bar.below ? bar.y + 6 : bar.y - 6}px"
 			role="toolbar"
 			aria-label="Text formatting"
 			data-testid="format-bar"

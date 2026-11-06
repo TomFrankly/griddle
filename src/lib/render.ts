@@ -3,6 +3,7 @@ import { maxPaintSide, paintCanvas } from './paint/paint-gl';
 import type { BackdropPaint } from './paint/presets';
 import {
 	captionInsets,
+	hasInside,
 	DEFAULT_CAPTIONS,
 	drawCaptions,
 	ensureCaptionFonts,
@@ -106,35 +107,73 @@ type Sized = { width: number; height: number; adjust: Adjust };
  * Where each image lands: the part of the cell it covers (all of it for fill) and its corner
  * radius. With a cell background the whole cell is the visible box, and the image sits inside it.
  */
+/**
+ * The part of a cell an image may use: inside any cell-background padding, and below or above
+ * captions placed inside the cell unless they sit over the image.
+ */
+export function imageArea(cell: Rect, style: CellStyle): Rect {
+	const pad = style.fill.on ? Math.max(0, Math.min(style.fill.padding, cell.w / 2 - 1, cell.h / 2 - 1)) : 0;
+	const c = style.captions;
+	const ins = c.on && !c.overlay ? captionInsets(c) : { top: 0, bottom: 0 };
+	const top = Math.min(ins.top, cell.h * 0.45);
+	const bottom = Math.min(ins.bottom, cell.h * 0.45);
+	return { x: cell.x + pad, y: cell.y + pad + top, w: Math.max(1, cell.w - 2 * pad), h: Math.max(1, cell.h - 2 * pad - top - bottom) };
+}
+
 function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: CellStyle): (PlanItem | null)[] {
 	const boxed = style.fill.on;
-	const ins = style.captions.on ? captionInsets(style.captions) : { top: 0, bottom: 0 };
+	const pct = style.corners.on ? Math.min(100, Math.max(0, style.corners.radius)) : 0;
 	return layout.cells.map((cell, i) => {
 		const img = sizes[i];
 		if (!img) return null;
-		const pad = boxed ? Math.max(0, Math.min(style.fill.padding, cell.w / 2 - 1, cell.h / 2 - 1)) : 0;
-		// Captions inside the cell take room from the image.
-		const top = Math.min(ins.top, cell.h * 0.45);
-		const bottom = Math.min(ins.bottom, cell.h * 0.45);
-		const inner = { x: cell.x + pad, y: cell.y + pad + top, w: cell.w - 2 * pad, h: Math.max(1, cell.h - 2 * pad - top - bottom) };
+		const inner = imageArea(cell, style);
 		const place = placeImage(img.width, img.height, inner, fit, img.adjust);
-		if (boxed) {
-			const pct = style.corners.on ? Math.min(100, Math.max(0, style.corners.radius)) : 0;
-			return { cell, place, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) };
-		}
-		const x = Math.max(cell.x, place.x);
-		const y = Math.max(cell.y, place.y);
+		if (boxed) return { cell, place, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) };
+		const x = Math.max(inner.x, place.x);
+		const y = Math.max(inner.y, place.y);
 		const visible = {
 			x,
 			y,
-			w: Math.min(cell.x + cell.w, place.x + place.w) - x,
-			h: Math.min(cell.y + cell.h, place.y + place.h) - y
+			w: Math.max(0, Math.min(inner.x + inner.w, place.x + place.w) - x),
+			h: Math.max(0, Math.min(inner.y + inner.h, place.y + place.h) - y)
 		};
-		const pct = style.corners.on ? Math.min(100, Math.max(0, style.corners.radius)) : 0;
 		const radius = (pct / 100) * (Math.min(visible.w, visible.h) / 2);
 		return { cell, place, visible, clip: visible, radius };
 	});
 }
+
+/** Gradients from the cell's top or bottom edge behind captions placed inside it. */
+function drawFades(ctx: Ctx, items: (PlanItem | null)[], texts: (Captioned | null)[], style: CellStyle) {
+	const c = style.captions;
+	const f = c.fade;
+	if (!c.on || !f.on || f.opacity <= 0) return;
+	const ins = captionInsets(c);
+	const n = parseInt(f.color.slice(1), 16);
+	const rgba = (a: number) => `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+	const alpha = Math.min(1, f.opacity / 100);
+	items.forEach((it, i) => {
+		if (!it) return;
+		const box = style.fill.on ? it.visible : it.visible.w && it.visible.h ? it.visible : it.cell;
+		for (const where of ['top', 'bottom'] as const) {
+			const h = where === 'top' ? ins.top : ins.bottom;
+			if (!h || !hasInside(c, texts[i], where)) continue;
+			const reach = Math.min(box.h, h + Math.max(0, f.length));
+			const y0 = where === 'top' ? box.y : box.y + box.h;
+			const y1 = where === 'top' ? box.y + reach : box.y + box.h - reach;
+			const g = ctx.createLinearGradient(0, y0, 0, y1);
+			g.addColorStop(0, rgba(alpha));
+			g.addColorStop(Math.min(0.95, (h * 0.6) / reach), rgba(alpha));
+			g.addColorStop(1, rgba(0));
+			ctx.save();
+			shape(ctx, box, it.radius);
+			ctx.clip();
+			ctx.fillStyle = g;
+			ctx.fillRect(box.x, Math.min(y0, y1), box.w, reach);
+			ctx.restore();
+		}
+	});
+}
+
 
 /** Draws a background into a rectangle, in the context's current coordinates. */
 function fillRectWith(ctx: Ctx, r: Rect, bg: Background) {
@@ -259,6 +298,7 @@ export function drawGrid(
 	drawFills(ctx, items, opts.style, opts.cellBackground);
 	const inset = borderInset(opts.style, opts.scale);
 	items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
+	drawFades(ctx, items, imgs, opts.style);
 	drawBorders(ctx, items, opts.style);
 	drawLines(ctx, layout, opts.style.lines);
 	drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
@@ -330,6 +370,7 @@ export async function renderFull(
 		drawImage(ctx, it, bmp, borderInset(opts.style, 1));
 		bmp.close();
 	}
+	drawFades(ctx, items, images, opts.style);
 	drawBorders(ctx, items, opts.style);
 	drawLines(ctx, layout, opts.style.lines);
 	drawCaptions(ctx, layout.cells, images, opts.style.captions, 1);
@@ -394,6 +435,8 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 	}
 	children.push({ name: 'Images', children: imageLayers, opened: true });
 
+	if (opts.style.captions.on && opts.style.captions.fade.on)
+		push(layer('Caption fades', full, (ctx) => drawFades(ctx, items, layout.cells.map((_, i) => images[i] ?? null), opts.style)));
 	if (opts.style.border.on && opts.style.border.width > 0) push(layer('Borders', full, (ctx) => drawBorders(ctx, items, opts.style)));
 	if (opts.style.lines.on && opts.style.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, opts.style.lines)));
 
@@ -461,6 +504,7 @@ export async function renderCells(
 		const bmp = await decode(images[i].file);
 		drawImage(ctx, it, bmp, borderInset(style, 1));
 		bmp.close();
+		if (caps) drawFades(ctx, [it], [images[i]], style);
 		drawBorders(ctx, [it], style);
 		if (caps) drawCaptions(ctx, [it.cell], [images[i]], style.captions, 1);
 		out.push({ index: i, blob: await canvasToBlob(canvas, 'png') });

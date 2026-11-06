@@ -26,9 +26,15 @@ export type TextStyle = {
 	shadow: TextShadow;
 };
 
+/** A gradient from the cell's edge behind captions placed inside it. */
+export type CaptionFade = { on: boolean; color: string; opacity: number; length: number };
+
 export type CaptionStyle = {
 	on: boolean;
 	align: 'left' | 'center' | 'right';
+	/** Inside captions sit over the image instead of taking room from it. */
+	overlay: boolean;
+	fade: CaptionFade;
 	title: TextStyle;
 	desc: TextStyle;
 };
@@ -38,6 +44,8 @@ const NO_SHADOW: TextShadow = { on: false, strength: 40, distance: 2, softness: 
 export const DEFAULT_CAPTIONS: CaptionStyle = {
 	on: false,
 	align: 'center',
+	overlay: false,
+	fade: { on: false, color: '#000000', opacity: 55, length: 60 },
 	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, lines: 1, shadow: { ...NO_SHADOW } },
 	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, lines: 2, shadow: { ...NO_SHADOW } }
 };
@@ -62,7 +70,12 @@ function parts(c: CaptionStyle, where: TextStyle['position']): Part[] {
 	return where === 'above' ? list.reverse() : list;
 }
 
-/** Space taken inside each cell, at its top and bottom, by captions placed there. */
+/** True when this cell has text in a caption placed at the top or bottom inside the cell. */
+export function hasInside(c: CaptionStyle, t: Captioned | null | undefined, where: 'top' | 'bottom'): boolean {
+	return !!t && parts(c, where).some((p) => !isEmpty(t[p.key]));
+}
+
+/** Height of the captions placed inside each cell, at its top and bottom. */
 export function captionInsets(c: CaptionStyle): { top: number; bottom: number } {
 	const sum = (p: Part[]) => p.reduce((t, x) => t + blockHeight(x.style), 0);
 	return { top: sum(parts(c, 'top')), bottom: sum(parts(c, 'bottom')) };
