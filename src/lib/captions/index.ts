@@ -32,8 +32,6 @@ export type CaptionFade = { on: boolean; color: string; opacity: number; length:
 export type CaptionStyle = {
 	on: boolean;
 	align: 'left' | 'center' | 'right';
-	/** Inside captions sit over the image instead of taking room from it. */
-	overlay: boolean;
 	fade: CaptionFade;
 	title: TextStyle;
 	desc: TextStyle;
@@ -44,7 +42,6 @@ const NO_SHADOW: TextShadow = { on: false, strength: 40, distance: 2, softness: 
 export const DEFAULT_CAPTIONS: CaptionStyle = {
 	on: false,
 	align: 'center',
-	overlay: false,
 	fade: { on: false, color: '#000000', opacity: 55, length: 60 },
 	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, lines: 1, shadow: { ...NO_SHADOW } },
 	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, lines: 2, shadow: { ...NO_SHADOW } }

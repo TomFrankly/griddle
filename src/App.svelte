@@ -1397,22 +1397,6 @@
 					</div>
 					{#if ['top', 'bottom'].includes(style.captions.title.position) || ['top', 'bottom'].includes(style.captions.desc.position)}
 						<div class="space-y-4 border-l pl-3" transition:slide={{ duration: 150 }}>
-							<div class="flex items-center justify-between">
-								<span class="flex items-center gap-1.5 text-sm">
-									Inside text
-									<InfoTip text="Push makes room for text inside the cell by shrinking the image. Overlay puts the text over the image." />
-								</span>
-								<ToggleGroup.Root
-									type="single"
-									variant="outline"
-									size="sm"
-									value={style.captions.overlay ? 'overlay' : 'push'}
-									onValueChange={(v) => v && (style.captions.overlay = v === 'overlay')}
-								>
-									<ToggleGroup.Item value="push" class="px-3" data-testid="caption-push">Push</ToggleGroup.Item>
-									<ToggleGroup.Item value="overlay" class="px-3" data-testid="caption-overlay">Overlay</ToggleGroup.Item>
-								</ToggleGroup.Root>
-							</div>
 							<label class="flex cursor-pointer items-center justify-between" for="caption-fade">
 								<span class="flex items-center gap-1.5 text-sm">
 									Fade behind text

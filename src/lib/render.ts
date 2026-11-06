@@ -108,16 +108,12 @@ type Sized = { width: number; height: number; adjust: Adjust };
  * radius. With a cell background the whole cell is the visible box, and the image sits inside it.
  */
 /**
- * The part of a cell an image may use: inside any cell-background padding, and below or above
- * captions placed inside the cell unless they sit over the image.
+ * The part of a cell an image may use: inside any cell-background padding. Captions placed inside
+ * the cell sit over the image, so they take no room from it.
  */
 export function imageArea(cell: Rect, style: CellStyle): Rect {
 	const pad = style.fill.on ? Math.max(0, Math.min(style.fill.padding, cell.w / 2 - 1, cell.h / 2 - 1)) : 0;
-	const c = style.captions;
-	const ins = c.on && !c.overlay ? captionInsets(c) : { top: 0, bottom: 0 };
-	const top = Math.min(ins.top, cell.h * 0.45);
-	const bottom = Math.min(ins.bottom, cell.h * 0.45);
-	return { x: cell.x + pad, y: cell.y + pad + top, w: Math.max(1, cell.w - 2 * pad), h: Math.max(1, cell.h - 2 * pad - top - bottom) };
+	return { x: cell.x + pad, y: cell.y + pad, w: Math.max(1, cell.w - 2 * pad), h: Math.max(1, cell.h - 2 * pad) };
 }
 
 function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: CellStyle): (PlanItem | null)[] {
