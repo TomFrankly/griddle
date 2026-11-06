@@ -27,6 +27,7 @@
 		fit,
 		index,
 		radius = 0,
+		free = false,
 		onfiles,
 		cols = 1,
 		rows = 1,
@@ -42,6 +43,8 @@
 		fit: FitMode;
 		index: number;
 		radius?: number;
+		/** The cell has its own background, so the image may slide off its edges. */
+		free?: boolean;
 		onfiles?: (files: FileList) => void;
 		cols?: number;
 		rows?: number;
@@ -125,7 +128,7 @@
 		onfiles(e.dataTransfer.files);
 	}
 	const box = $derived(area ?? rect);
-	const place = $derived(placeImage(image.width, image.height, box, fit, image.adjust));
+	const place = $derived(placeImage(image.width, image.height, box, fit, image.adjust, free));
 	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
 	const movable = $derived(Math.abs(place.slackX) > 0.5 || Math.abs(place.slackY) > 0.5);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);

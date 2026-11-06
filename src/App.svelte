@@ -1598,6 +1598,7 @@
 									<CellOverlay
 										{rect}
 										area={displayAreas[i]}
+										free={style.fill.on}
 										image={images[i]}
 										{fit}
 										index={i}

@@ -131,7 +131,7 @@ function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: Cell
 		const img = sizes[i];
 		if (!img) return null;
 		const inner = imageArea(cell, style);
-		const place = placeImage(img.width, img.height, inner, fit, img.adjust);
+		const place = placeImage(img.width, img.height, inner, fit, img.adjust, style.fill.on);
 		if (boxed) return { cell, place, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) };
 		const x = Math.max(inner.x, place.x);
 		const y = Math.max(inner.y, place.y);
