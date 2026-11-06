@@ -9,6 +9,7 @@
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import TypeIcon from '@lucide/svelte/icons/type';
+	import GripIcon from '@lucide/svelte/icons/grip';
 	import Stepper from './stepper.svelte';
 	import RichText from './rich-text.svelte';
 	import { placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
@@ -24,7 +25,9 @@
 		onfiles,
 		cols = 1,
 		rows = 1,
-		captions
+		captions,
+		onreorder,
+		lifted = false
 	}: {
 		rect: Rect;
 		image: GridImage;
@@ -35,6 +38,10 @@
 		cols?: number;
 		rows?: number;
 		captions?: CaptionStyle;
+		/** Starts moving this image to another cell. */
+		onreorder?: (e: PointerEvent) => void;
+		/** True while this image is being moved. */
+		lifted?: boolean;
 	} = $props();
 
 	let spanOpen = $state(false);
@@ -145,6 +152,9 @@
 	ondragleave={onDragLeave}
 	ondrop={onDrop}
 >
+	{#if lifted}
+		<div class="bg-background/60 pointer-events-none absolute inset-0" style:border-radius="{radius}px"></div>
+	{/if}
 	{#if fileOver > 0}
 		<div
 			class="bg-primary/25 ring-primary pointer-events-none absolute inset-0 z-10 flex items-center justify-center ring-2 ring-inset"
@@ -166,6 +176,22 @@
 			data-cell-control
 			role="presentation"
 		>
+			{#if onreorder}
+				<button
+					type="button"
+					class="{pill} size-7 cursor-grab touch-none active:cursor-grabbing"
+					aria-label="Move image {index + 1}"
+					title="Drag to move"
+					data-testid="cell-move"
+					onpointerdown={(e) => {
+						if (e.button !== 0) return;
+						e.preventDefault();
+						onreorder(e);
+					}}
+				>
+					<GripIcon class="size-3.5" />
+				</button>
+			{/if}
 			<Popover.Root bind:open={spanOpen}>
 				<Popover.Trigger>
 					{#snippet child({ props })}

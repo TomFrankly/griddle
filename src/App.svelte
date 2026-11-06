@@ -622,6 +622,60 @@
 		const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		insertAt = e.clientX < box.left + box.width / 2 ? i : i + 1;
 	}
+	// Moving images by dragging them on the grid itself
+	let lift = $state<{ from: number; x: number; y: number; at: number | null } | null>(null);
+	let previewEl = $state<HTMLDivElement>();
+	/** The insertion line between cells, in preview pixels. */
+	const liftLine = $derived.by(() => {
+		if (!lift || lift.at === null || !displayCells.length) return null;
+		const g = (gap * k) / 2;
+		const at = lift.at;
+		const before = displayCells[at];
+		const after = displayCells[at - 1];
+		// Between two cells in one row, centre the line in the gap; otherwise put it beside the cell.
+		if (before && (!after || Math.abs(after.y - before.y) > 1)) return { x: before.x - g, y: before.y, h: before.h };
+		if (after) return { x: after.x + after.w + g, y: after.y, h: after.h };
+		return null;
+	});
+	function startLift(e: PointerEvent, from: number) {
+		lift = { from, x: e.clientX, y: e.clientY, at: null };
+		const move = (ev: PointerEvent) => {
+			if (!lift || !previewEl) return;
+			const box = previewEl.getBoundingClientRect();
+			const px = ev.clientX - box.left;
+			const py = ev.clientY - box.top;
+			let at = lift.at;
+			displayCells.forEach((c, i) => {
+				if (px >= c.x - gap * k && px <= c.x + c.w + gap * k && py >= c.y && py <= c.y + c.h)
+					at = px < c.x + c.w / 2 ? i : i + 1;
+			});
+			lift = { ...lift, x: ev.clientX, y: ev.clientY, at };
+		};
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', cancel);
+			const l = lift;
+			lift = null;
+			if (!l || l.at === null) return;
+			const to = l.at > l.from ? l.at - 1 : l.at;
+			if (to === l.from) return;
+			const next = [...images];
+			const [moved] = next.splice(l.from, 1);
+			next.splice(to, 0, moved);
+			images = next;
+		};
+		const cancel = () => {
+			lift = null;
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', cancel);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+		window.addEventListener('pointercancel', cancel);
+	}
+
 	function onThumbDrop() {
 		const from = images.findIndex((i) => i.id === dragId);
 		const at = insertAt;
@@ -1105,7 +1159,7 @@
 					class="bg-accent relative flex h-[62svh] items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
 					{#if images.length}
-						<div class="relative shadow-sm" style="width:{preview.w}px;height:{preview.h}px">
+						<div bind:this={previewEl} class="relative shadow-sm" style="width:{preview.w}px;height:{preview.h}px">
 							<canvas bind:this={canvas} class="checker absolute inset-0 size-full" data-testid="preview"></canvas>
 							{#each displayCells as rect, i (images[i]?.id ?? i)}
 								{#if images[i]}
@@ -1118,11 +1172,31 @@
 										cols={layout.cols}
 										rows={Math.max(layout.rows, grid.rows)}
 										captions={style.captions}
+										onreorder={images.length > 1 ? (e) => startLift(e, i) : undefined}
+										lifted={lift?.from === i}
 										radius={style.corners.on ? (style.corners.radius / 100) * (Math.min(rect.w, rect.h) / 2) : 0}
 									/>
 								{/if}
 							{/each}
+							{#if liftLine}
+								<div
+									class="bg-primary ring-background pointer-events-none absolute z-20 w-1 -translate-x-1/2 ring-2"
+									style:left="{liftLine.x}px"
+									style:top="{liftLine.y}px"
+									style:height="{liftLine.h}px"
+									data-testid="grid-insert-line"
+								></div>
+							{/if}
 						</div>
+						{#if lift && images[lift.from]}
+							<img
+								src={images[lift.from].thumbUrl}
+								alt=""
+								class="pointer-events-none fixed z-50 size-20 -translate-x-1/2 -translate-y-1/2 object-cover opacity-80 shadow-lg"
+								style:left="{lift.x}px"
+								style:top="{lift.y}px"
+							/>
+						{/if}
 					{:else}
 						<button
 							type="button"
