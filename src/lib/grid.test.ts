@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { autoGrid, computeLayout, placeImage, placeSlots } from './grid';
+import { autoGrid, computeLayout, placeImage, placeSlots, randomSpans } from './grid';
 
 const base = { cols: 3, rows: 3, aspect: 1, longEdge: 1000, gutter: 10, padding: 10 };
 
@@ -161,5 +161,19 @@ describe('autoGrid', () => {
 	it('leaves room for spanning cells', () => {
 		const g = autoGrid([{ w: 2, h: 2 }, ...Array(5).fill({ w: 1, h: 1 })], 1);
 		expect(placeSlots(6, [{ w: 2, h: 2 }], g.cols, g.rows)).toHaveLength(6);
+	});
+});
+
+describe('randomSpans', () => {
+	it('makes at least one larger cell and keeps every image placeable', () => {
+		let seed = 7;
+		const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+		for (let n = 2; n <= 12; n++) {
+			const spans = randomSpans(n, 1, 1, rnd);
+			expect(spans).toHaveLength(n);
+			expect(spans.some((s) => s.w > 1 || s.h > 1)).toBe(true);
+			const g = autoGrid(spans, 1);
+			expect(placeSlots(n, spans, g.cols, g.rows)).toHaveLength(n);
+		}
 	});
 });

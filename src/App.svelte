@@ -36,7 +36,8 @@
 	import LinkIcon from '@lucide/svelte/icons/link-2';
 	import UnlinkIcon from '@lucide/svelte/icons/unlink-2';
 	import { Toggle } from '$lib/components/ui/toggle/index.js';
-	import { autoGrid, computeLayout } from '$lib/grid';
+	import { autoGrid, computeLayout, randomSpans } from '$lib/grid';
+	import DicesIcon from '@lucide/svelte/icons/dices';
 	import { captionBands, ensureCaptionFonts, fromPlain } from '$lib/captions';
 	import TextStyleFields from '$lib/components/text-style-fields.svelte';
 	import LooksMenu from '$lib/components/looks-menu.svelte';
@@ -564,6 +565,19 @@
 		}
 		images = next;
 	}
+	/** Shuffles the images and makes a few of them larger, for a bento layout. */
+	function randomBento() {
+		if (images.length < 2) return;
+		const next = [...images];
+		for (let i = next.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[next[i], next[j]] = [next[j], next[i]];
+		}
+		const spans = randomSpans(next.length, ratio || 1, frame ? frame.w / frame.h : 1);
+		next.forEach((img, i) => (img.span = spans[i]));
+		autoLayout = true;
+		images = next;
+	}
 	function sortByName() {
 		images = [...images].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 	}
@@ -885,7 +899,18 @@
 				<section class="space-y-3 border-b p-4">
 					<div class="flex items-center justify-between">
 						<h2 class="text-muted-foreground text-xs font-medium">Grid</h2>
-						<label class="flex cursor-pointer items-center gap-2 text-sm" for="auto-layout">
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								{#snippet child({ props })}
+									<Button {...props} variant="ghost" size="sm" class="ml-auto h-7 px-2" onclick={randomBento} disabled={images.length < 2} data-testid="random-bento">
+										<DicesIcon />
+										Random
+									</Button>
+								{/snippet}
+							</Tooltip.Trigger>
+							<Tooltip.Content>Shuffle the images and make a few of them larger</Tooltip.Content>
+						</Tooltip.Root>
+						<label class="ml-2 flex cursor-pointer items-center gap-2 text-sm" for="auto-layout">
 							<span class="flex items-center gap-1.5">
 								Auto
 								<InfoTip text="Picks columns and rows to fit your images. Changing either one switches to manual." />

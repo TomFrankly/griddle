@@ -174,6 +174,28 @@ export function autoGrid(spans: Span[], aspect: number, target = 1): { cols: num
 	return { cols: best.cols, rows: best.rows };
 }
 
+/**
+ * A random bento: a few cells made larger, picked from several tries so the grid has as few
+ * empty spots as possible. `random` is injectable for tests.
+ */
+export function randomSpans(count: number, aspect: number, target = 1, random = Math.random): Span[] {
+	const n = Math.max(0, Math.floor(count));
+	if (n < 2) return Array.from({ length: n }, () => ({ w: 1, h: 1 }));
+	const shapes: Span[] = n >= 5 ? [{ w: 2, h: 2 }, { w: 2, h: 1 }, { w: 1, h: 2 }, { w: 2, h: 2 }] : [{ w: 2, h: 1 }, { w: 1, h: 2 }];
+	let best: { spans: Span[]; score: number } | null = null;
+	for (let t = 0; t < 40; t++) {
+		const spans: Span[] = Array.from({ length: n }, () => ({ w: 1, h: 1 }));
+		const big = 1 + Math.floor(random() * Math.max(1, Math.round(n / 4)));
+		for (let k = 0; k < big; k++) spans[Math.floor(random() * n)] = { ...shapes[Math.floor(random() * shapes.length)] };
+		const g = autoGrid(spans, aspect, target);
+		const area = spans.reduce((a, s) => a + s.w * s.h, 0);
+		// Fewer holes is better; a little noise keeps repeated presses varied.
+		const score = g.cols * g.rows - area + random() * 0.5;
+		if (!best || score < best.score) best = { spans, score };
+	}
+	return best!.spans;
+}
+
 export type Adjust = {
 	/** 1 is the default size (cover for fill, contain for fit). */
 	zoom: number;
