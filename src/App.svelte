@@ -45,7 +45,7 @@
 	import AlignCenterIcon from '@lucide/svelte/icons/align-center';
 	import AlignRightIcon from '@lucide/svelte/icons/align-right';
 	import { applyLook, scaleStyle, withDefaults, type Look } from '$lib/looks';
-	import { loadFiles, loadSettings, saveSettings, syncFiles } from '$lib/persist';
+	import { loadBackground, loadFiles, loadSettings, saveBackground, saveSettings, storeFile, syncFiles } from '$lib/persist';
 	import {
 		canvasToBlob,
 		decode,
@@ -111,7 +111,7 @@
 	let linkPadding = $state(true);
 	let bgId = $state('white');
 	let customColor = $state('#f4f1ea');
-	let bgImage = $state<{ bitmap: ImageBitmap; url: string; name: string } | null>(null);
+	let bgImage = $state<{ bitmap: ImageBitmap; url: string; name: string; file: File } | null>(null);
 	let style = $state<CellStyle>(structuredClone(DEFAULT_STYLE));
 	let size = $state('1920');
 	let customSize = $state(3000);
@@ -344,18 +344,21 @@
 	let persistTimer: ReturnType<typeof setTimeout> | undefined;
 	function persist() {
 		clearTimeout(persistTimer);
-		persistTimer = setTimeout(() => {
-			if (!current) return;
-			const snap = current.snap;
-			saveSettings({ v: 1, snap, welcomeDismissed } satisfies Saved);
-			const files = snap.showingExamples
-				? []
-				: snap.images.flatMap((i) => {
-						const img = pool.get(i.id);
-						return img ? [{ id: i.id, file: img.file }] : [];
-					});
-			syncFiles(files);
-		}, 500);
+		persistTimer = setTimeout(persistNow, 500);
+	}
+	function persistNow() {
+		clearTimeout(persistTimer);
+		if (!current) return;
+		const snap = current.snap;
+		saveSettings({ v: 1, snap, welcomeDismissed } satisfies Saved);
+		const files = snap.showingExamples
+			? []
+			: snap.images.flatMap((i) => {
+					const img = pool.get(i.id);
+					return img ? [{ id: i.id, file: img.file }] : [];
+				});
+		syncFiles(files);
+		saveBackground(bgImage?.file ?? null);
 	}
 
 	/** Brings back the last session: its images if they were your own, and all its settings. */
@@ -364,7 +367,14 @@
 		if (!saved || saved.v !== 1 || !saved.snap) return false;
 		welcomeDismissed = !!saved.welcomeDismissed;
 		const snap = saved.snap;
-		if (!snap.showingExamples && snap.images.length) {
+		const bg = await loadBackground();
+		if (bg) await setBackgroundImage(bg, false);
+		if (!snap.showingExamples && !snap.images.length) {
+			// The canvas was cleared on purpose; keep it empty.
+			restore(snap);
+			return true;
+		}
+		if (!snap.showingExamples) {
 			const files = await loadFiles(snap.images.map((i) => i.id));
 			loading += files.size;
 			for (const [id, file] of files) {
@@ -494,6 +504,7 @@
 			showingExamples = false;
 		}
 		const ok = await loadAll(files);
+		if (!examples) ok.forEach((img) => storeFile(img.id, img.file));
 		images = [...images, ...ok];
 		if (examples) showingExamples = ok.length > 0;
 	}
@@ -521,6 +532,7 @@
 		if (!files.length) return;
 		const ok = await loadAll(files);
 		if (!ok.length) return;
+		ok.forEach((img) => storeFile(img.id, img.file));
 		const next = [...images];
 		ok.forEach((img, j) => {
 			// The new image takes over the cell's size in the layout.
@@ -531,7 +543,7 @@
 		showingExamples = false;
 	}
 
-	async function setBackgroundImage(file: File | undefined) {
+	async function setBackgroundImage(file: File | undefined, select = true) {
 		if (!file || !file.type.startsWith('image/')) return;
 		try {
 			const bitmap = await downscale(await decode(file), 8192);
@@ -539,8 +551,12 @@
 				bgImage.bitmap.close();
 				URL.revokeObjectURL(bgImage.url);
 			}
-			bgImage = { bitmap, url: URL.createObjectURL(file), name: file.name };
-			bgId = 'image';
+			bgImage = { bitmap, url: URL.createObjectURL(file), name: file.name, file };
+			if (select) {
+				bgId = 'image';
+				saveBackground(file);
+				persist();
+			}
 		} catch {
 			toast.error("That background image couldn't be read");
 		}
@@ -744,6 +760,30 @@
 		const index = hovered ? Number(hovered.dataset.index) : NaN;
 		if (Number.isInteger(index)) replaceAt(index, files);
 		else addFiles(files);
+	}
+
+	// Save right away when the tab is hidden or closed, so nothing waits on the timers.
+	function saveOnLeave() {
+		if (document.visibilityState === 'visible' && !leaving) return;
+		flush();
+		persistNow();
+	}
+	let leaving = false;
+	onMount(() => {
+		const hide = () => {
+			leaving = true;
+			saveOnLeave();
+		};
+		document.addEventListener('visibilitychange', saveOnLeave);
+		window.addEventListener('pagehide', hide);
+		return () => {
+			document.removeEventListener('visibilitychange', saveOnLeave);
+			window.removeEventListener('pagehide', hide);
+		};
+	});
+
+	async function loadSamples() {
+		await addFiles(await exampleFiles(), true);
 	}
 
 	onDestroy(() => {
@@ -1237,15 +1277,18 @@
 							/>
 						{/if}
 					{:else}
-						<button
-							type="button"
-							class="hover:bg-background/60 flex flex-col items-center gap-3 border px-16 py-14 text-center transition-colors"
-							onclick={() => fileInput.click()}
-						>
-							<ImagePlusIcon class="text-muted-foreground size-6" />
-							<span class="text-sm font-medium">Drop images here</span>
-							<span class="text-muted-foreground text-xs">or click to choose</span>
-						</button>
+						<div class="flex flex-col items-center gap-3">
+							<button
+								type="button"
+								class="hover:bg-background/60 flex flex-col items-center gap-3 border px-16 py-14 text-center transition-colors"
+								onclick={() => fileInput.click()}
+							>
+								<ImagePlusIcon class="text-muted-foreground size-6" />
+								<span class="text-sm font-medium">Drop images here</span>
+								<span class="text-muted-foreground text-xs">or click to choose</span>
+							</button>
+							<Button variant="ghost" size="sm" onclick={loadSamples} disabled={loading > 0} data-testid="load-samples">Load samples</Button>
+						</div>
 					{/if}
 					{#if loading}
 						<div class="bg-background absolute top-3 right-3 flex items-center gap-2 border px-2.5 py-1 text-xs">
