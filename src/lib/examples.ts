@@ -51,7 +51,8 @@ async function placeholderFiles(n: number): Promise<File[]> {
 	return out;
 }
 
-// Photos in src/assets/examples (pose-1.jpg … pose-9.jpg) make the grid shown before any upload.
+// Photos in src/assets/examples (pose-1 … pose-9, keyed out to transparency) make the grid shown
+// before any upload.
 const bundled = import.meta.glob('../assets/examples/*.{jpg,jpeg,png,webp}', {
 	eager: true,
 	query: '?url',
@@ -64,7 +65,7 @@ export async function exampleFiles(): Promise<File[]> {
 	return Promise.all(
 		entries.map(async ([path, url]) => {
 			const blob = await (await fetch(url)).blob();
-			return new File([blob], path.split('/').pop() ?? 'example.jpg', { type: blob.type || 'image/jpeg' });
+			return new File([blob], path.split('/').pop() ?? 'example.webp', { type: blob.type || 'image/webp' });
 		})
 	);
 }
