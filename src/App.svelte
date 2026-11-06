@@ -1394,6 +1394,7 @@
 										captions={style.captions}
 										onreorder={images.length > 1 ? (e) => startLift(e, i) : undefined}
 										lifted={lift?.from === i}
+										onremove={() => remove(images[i].id)}
 										radius={style.corners.on ? (style.corners.radius / 100) * (Math.min(rect.w, rect.h) / 2) : 0}
 									/>
 								{/if}

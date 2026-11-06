@@ -2,6 +2,8 @@
   Sits over one grid cell in the preview: drag to move the image inside its cell, scroll or use
   the slider to zoom, and reset to the default size and position. Dropping image files on it
   replaces the image. Hover controls also set how many cells the image spans and edit its caption.
+  On small cells the controls fold into one button that drags to move and opens a menu with
+  everything; right-clicking any cell opens the same menu.
 -->
 <script lang="ts">
 	import { Slider } from '$lib/components/ui/slider/index.js';
@@ -10,6 +12,8 @@
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import TypeIcon from '@lucide/svelte/icons/type';
 	import GripIcon from '@lucide/svelte/icons/grip';
+	import ImageUpIcon from '@lucide/svelte/icons/image-up';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import Stepper from './stepper.svelte';
 	import RichText from './rich-text.svelte';
 	import { placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
@@ -27,6 +31,7 @@
 		rows = 1,
 		captions,
 		onreorder,
+		onremove,
 		lifted = false
 	}: {
 		rect: Rect;
@@ -42,11 +47,56 @@
 		onreorder?: (e: PointerEvent) => void;
 		/** True while this image is being moved. */
 		lifted?: boolean;
+		onremove?: () => void;
 	} = $props();
 
 	let spanOpen = $state(false);
 	let textOpen = $state(false);
-	const menuOpen = $derived(spanOpen || textOpen);
+	let allOpen = $state(false);
+	const menuOpen = $derived(spanOpen || textOpen || allOpen);
+	/** Below this size the hover controls don't fit, so they fold into one button. */
+	const compact = $derived(rect.w < 190 || rect.h < 130);
+	let anchor = $state({ x: 0, y: 0 });
+	const virtualAnchor = { getBoundingClientRect: () => new DOMRect(anchor.x, anchor.y, 0, 0) };
+	let fileInput = $state<HTMLInputElement>();
+	const hasCaptions = $derived(!!captions?.on && (captions.title.on || captions.desc.on));
+
+	function openAll(x: number, y: number) {
+		anchor = { x, y };
+		allOpen = true;
+	}
+	function onContextMenu(e: MouseEvent) {
+		e.preventDefault();
+		openAll(e.clientX, e.clientY);
+	}
+	/** Drag the folded button to move the image; a click without moving opens the menu. */
+	function onGripDown(e: PointerEvent) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const start = { x: e.clientX, y: e.clientY };
+		const btn = e.currentTarget as HTMLElement;
+		let moved = false;
+		const move = (ev: PointerEvent) => {
+			if (moved || Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 5) return;
+			moved = true;
+			done();
+			onreorder?.(ev);
+		};
+		const up = () => {
+			done();
+			if (!moved) {
+				const r = btn.getBoundingClientRect();
+				openAll(r.left, r.bottom + 4);
+			}
+		};
+		const done = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+	}
 	const pill =
 		'bg-background/70 text-foreground hover:bg-background/90 flex h-7 items-center justify-center gap-1 rounded-full shadow-sm backdrop-blur-sm';
 
@@ -151,6 +201,7 @@
 	ondragover={onDragOver}
 	ondragleave={onDragLeave}
 	ondrop={onDrop}
+	oncontextmenu={onContextMenu}
 >
 	{#if lifted}
 		<div class="bg-background/60 pointer-events-none absolute inset-0" style:border-radius="{radius}px"></div>
@@ -169,7 +220,83 @@
 		style:border-radius="{radius}px"
 		class:opacity-100={dragging}
 	></div>
-	{#if rect.w >= 72 && rect.h >= 48}
+	<input
+		bind:this={fileInput}
+		type="file"
+		accept="image/*"
+		class="hidden"
+		onchange={(e) => {
+			if (e.currentTarget.files?.length) onfiles?.(e.currentTarget.files);
+			e.currentTarget.value = '';
+		}}
+	/>
+	<Popover.Root bind:open={allOpen}>
+		<Popover.Content class="w-64 gap-0 p-0" customAnchor={virtualAnchor} align="start" data-testid="cell-menu">
+			<div class="space-y-3 p-3">
+				<div class="flex items-center justify-between">
+					<span class="text-sm">Across</span>
+					<Stepper bind:value={image.span.w} min={1} max={Math.max(1, cols)} label="Cells across" />
+				</div>
+				<div class="flex items-center justify-between">
+					<span class="text-sm">Down</span>
+					<Stepper bind:value={image.span.h} min={1} max={Math.max(1, rows)} label="Cells down" />
+				</div>
+				<div class="space-y-2">
+					<div class="flex items-center justify-between text-sm">
+						<span>Zoom</span>
+						<button type="button" class="text-muted-foreground hover:text-foreground text-xs disabled:opacity-40" disabled={!adjusted} onclick={reset}>Reset</button>
+					</div>
+					<Slider type="single" min={1} max={ZOOM_MAX} step={0.01} bind:value={image.adjust.zoom} aria-label="Zoom image {index + 1}" />
+				</div>
+				{#if hasCaptions && captions}
+					{#if captions.title.on}
+						<RichText bind:value={image.title} label="Title for image {index + 1}" placeholder="Title" testid="menu-title" />
+					{/if}
+					{#if captions.desc.on}
+						<RichText bind:value={image.desc} label="Description for image {index + 1}" placeholder="Description" testid="menu-desc" />
+					{/if}
+				{/if}
+			</div>
+			<div class="border-t p-1">
+				<button type="button" class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm" onclick={() => fileInput?.click()}>
+					<ImageUpIcon class="size-4" /> Replace image
+				</button>
+				{#if onremove}
+					<button
+						type="button"
+						class="hover:bg-accent text-destructive flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
+						onclick={() => {
+							allOpen = false;
+							onremove();
+						}}
+						data-testid="cell-remove"
+					>
+						<Trash2Icon class="size-4" /> Remove
+					</button>
+				{/if}
+			</div>
+		</Popover.Content>
+	</Popover.Root>
+	{#if compact && rect.w >= 30 && rect.h >= 30}
+		<button
+			type="button"
+			class="{pill} absolute top-1 left-1 size-7 cursor-grab opacity-0 transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 active:cursor-grabbing"
+			class:opacity-100={menuOpen}
+			aria-label="Options for image {index + 1}"
+			title="Drag to move, click for options"
+			data-testid="cell-more"
+			data-cell-control
+			onpointerdown={onGripDown}
+			onkeydown={(e) => {
+				if (e.key !== 'Enter' && e.key !== ' ') return;
+				e.preventDefault();
+				const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+				openAll(r.left, r.bottom + 4);
+			}}
+		>
+			<GripIcon class="size-3.5" />
+		</button>
+	{:else if !compact}
 		<div
 			class="absolute top-1.5 left-1.5 flex gap-1 opacity-0 transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
 			class:opacity-100={menuOpen}
