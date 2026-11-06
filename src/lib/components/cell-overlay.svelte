@@ -262,7 +262,7 @@
 	{#if empty}
 		<button
 			type="button"
-			class="group/empty bg-foreground/[0.04] ring-foreground/15 hover:bg-foreground/[0.08] absolute inset-0 flex items-center justify-center ring-1 ring-inset transition-colors"
+			class="group/empty ring-foreground/15 hover:bg-foreground/[0.04] absolute inset-0 flex items-center justify-center ring-1 ring-inset transition-colors"
 			style:border-radius="{radius}px"
 			tabindex="-1"
 			aria-label="Add an image to slot {index + 1}"

@@ -134,7 +134,7 @@
 	let cellImage = $state<Upload | null>(null);
 	// The keyed-out sample photos sit on a green cell background.
 	const SAMPLE_FILL = { on: true, bgId: 'custom', color: '#1ccd50' };
-	let style = $state<CellStyle>({ ...structuredClone(DEFAULT_STYLE), fill: { ...DEFAULT_STYLE.fill, ...SAMPLE_FILL } });
+	let style = $state<CellStyle>(structuredClone(DEFAULT_STYLE));
 	let size = $state('1920');
 	let customSize = $state(3000);
 	let autoLayout = $state(true);
@@ -1469,7 +1469,7 @@
 		</header>
 
 		<div class="flex flex-col-reverse md:min-h-0 md:flex-1 md:flex-row">
-			<aside class="shrink-0 border-t md:w-80 md:overflow-y-auto md:border-t-0 md:border-r" class:hidden={!images.length}>
+			<aside class="shrink-0 border-t md:w-80 md:overflow-y-auto md:border-t-0 md:border-r transition-opacity" class:opacity-40={!images.length} inert={!images.length}>
 				<section class="space-y-3 border-b p-4">
 					<div class="flex items-center justify-between">
 						<h2 class="text-muted-foreground text-xs font-medium">Grid</h2>
