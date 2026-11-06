@@ -243,8 +243,10 @@ export function placeImage(
 	const k = base * zoom;
 	const w = imgW * k;
 	const h = imgH * k;
-	const slackX = Math.max(0, w - cell.w);
-	const slackY = Math.max(0, h - cell.h);
+	// Positive slack is overflow to pan across; negative slack is free space to move the
+	// image around in when it is smaller than its cell.
+	const slackX = w - cell.w;
+	const slackY = h - cell.h;
 	const ox = Math.min(1, Math.max(-1, adjust.ox || 0));
 	const oy = Math.min(1, Math.max(-1, adjust.oy || 0));
 	return {

@@ -195,4 +195,13 @@ describe('zooming out a filled image', () => {
 		expect(minZoom(100, 100, cell, 'fit')).toBe(0.25);
 		expect(placeImage(100, 100, cell, 'fit', { zoom: 0.25, ox: 0, oy: 0 }).h).toBeCloseTo(25);
 	});
+	it('moves a shrunken image anywhere inside its cell', () => {
+		const left = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: -1, oy: 0 });
+		expect(left.x).toBeCloseTo(0);
+		const right = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: 1, oy: 1 });
+		expect(right.x + right.w).toBeCloseTo(200);
+		expect(right.y + right.h).toBeCloseTo(100);
+		const top = placeImage(100, 100, cell, 'fill', { zoom: 0.25, ox: 0, oy: -1 });
+		expect(top.y).toBeCloseTo(0);
+	});
 });

@@ -127,7 +127,7 @@
 	const box = $derived(area ?? rect);
 	const place = $derived(placeImage(image.width, image.height, box, fit, image.adjust));
 	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
-	const movable = $derived(place.slackX > 0.5 || place.slackY > 0.5);
+	const movable = $derived(Math.abs(place.slackX) > 0.5 || Math.abs(place.slackY) > 0.5);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
 	const clamp = (n: number) => Math.min(1, Math.max(-1, n));
 
@@ -141,8 +141,8 @@
 		const start = { x: e.clientX, y: e.clientY, ox: image.adjust.ox, oy: image.adjust.oy };
 		const { slackX, slackY } = place;
 		const move = (ev: PointerEvent) => {
-			if (slackX > 0.5) image.adjust.ox = clamp(start.ox - (2 * (ev.clientX - start.x)) / slackX);
-			if (slackY > 0.5) image.adjust.oy = clamp(start.oy - (2 * (ev.clientY - start.y)) / slackY);
+			if (Math.abs(slackX) > 0.5) image.adjust.ox = clamp(start.ox - (2 * (ev.clientX - start.x)) / slackX);
+			if (Math.abs(slackY) > 0.5) image.adjust.oy = clamp(start.oy - (2 * (ev.clientY - start.y)) / slackY);
 		};
 		const up = () => {
 			dragging = false;
@@ -163,6 +163,12 @@
 		image.adjust.zoom = Math.min(ZOOM_MAX, Math.max(zoomMin, z));
 	}
 
+	function recenter(e: MouseEvent) {
+		if ((e.target as Element).closest('[data-cell-control]')) return;
+		image.adjust.ox = 0;
+		image.adjust.oy = 0;
+	}
+
 	function reset() {
 		image.adjust = { zoom: 1, ox: 0, oy: 0 };
 	}
@@ -178,8 +184,9 @@
 		const m = d[e.key];
 		if (!m) return;
 		e.preventDefault();
-		image.adjust.ox = clamp(image.adjust.ox - m[0]);
-		image.adjust.oy = clamp(image.adjust.oy - m[1]);
+		// Panning a large image and moving a small one go opposite ways for the same arrow.
+		image.adjust.ox = clamp(image.adjust.ox - m[0] * (place.slackX < 0 ? -1 : 1));
+		image.adjust.oy = clamp(image.adjust.oy - m[1] * (place.slackY < 0 ? -1 : 1));
 	}
 </script>
 
@@ -196,7 +203,7 @@
 	role="application"
 	aria-roledescription="image crop"
 	tabindex="0"
-	aria-label="Image {index + 1}: {image.name}. Drag or use arrow keys to move it, scroll to zoom."
+	aria-label="Image {index + 1}: {image.name}. Drag or use arrow keys to move it, double-click to center it, scroll to zoom."
 	data-testid="cell"
 	data-index={index}
 	onpointerdown={onPointerDown}
@@ -207,6 +214,7 @@
 	ondragleave={onDragLeave}
 	ondrop={onDrop}
 	oncontextmenu={onContextMenu}
+	ondblclick={recenter}
 >
 	{#if lifted}
 		<div class="bg-background/60 pointer-events-none absolute inset-0" style:border-radius="{radius}px"></div>
@@ -225,6 +233,13 @@
 		style:border-radius="{radius}px"
 		class:opacity-100={dragging || allOpen}
 	></div>
+	{#if adjusted && !dragging}
+		<div
+			class="pointer-events-none absolute top-1.5 left-1.5 size-1.5 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)] transition-opacity group-hover/cell:opacity-0"
+			title="Moved or zoomed"
+			data-testid="cell-adjusted"
+		></div>
+	{/if}
 	<input
 		bind:this={fileInput}
 		type="file"
