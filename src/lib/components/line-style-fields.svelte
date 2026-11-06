@@ -1,6 +1,6 @@
 <!--
-  Settings for divider lines: type, thickness, color and opacity up front; pattern, crossings,
-  ornaments and effects as each becomes relevant.
+  Settings for divider lines, in three groups: the line itself, what happens where lines cross,
+  and an ornament in the middle of each segment. Rarer settings sit behind "More options".
 -->
 <script lang="ts">
 	import { slide } from 'svelte/transition';
@@ -16,20 +16,40 @@
 	let more = $state(false);
 
 	const typeLabel = $derived(LINE_TYPES.flatMap((g) => g.items).find((t) => t.value === value.type)?.label ?? 'Solid');
-	const markLabel = $derived(MARKS.find((m) => m.value === value.crossing)?.label ?? 'Nothing');
-	const ornLabel = $derived(ORNAMENTS.find((m) => m.value === value.ornament)?.label ?? 'None');
 	const hasLine = $derived(value.type !== 'none');
-	const showMarkSize = $derived(value.crossing !== 'none' || (hasLine && value.ornament !== 'none'));
+	const hasMark = $derived(value.crossing !== 'none' && value.crossing !== 'gap');
+	const sizeMax = $derived(Math.max(60, spaceMax));
+
+	function pickType(v: string) {
+		if (!v) return;
+		value.type = v as LineType;
+		// Marks only needs a mark to show anything.
+		if (v === 'none' && !hasMark) value.crossing = 'plus';
+	}
 </script>
 
+{#snippet heading(text: string)}
+	<div class="text-muted-foreground pt-1 text-[11px] font-medium">{text}</div>
+{/snippet}
+
+{#snippet picker(label: string, current: string, items: { value: string; label: string }[], onpick: (v: string) => void, testid: string)}
+	<div class="flex items-center justify-between">
+		<span class="text-sm">{label}</span>
+		<Select.Root type="single" value={current} onValueChange={(v) => v && onpick(v)}>
+			<Select.Trigger size="sm" class="w-36" data-testid={testid}>{items.find((i) => i.value === current)?.label}</Select.Trigger>
+			<Select.Content>
+				{#each items as m (m.value)}
+					<Select.Item value={m.value} label={m.label}>{m.label}</Select.Item>
+				{/each}
+			</Select.Content>
+		</Select.Root>
+	</div>
+{/snippet}
+
+{@render heading('Line')}
 <div class="flex items-center justify-between">
 	<span class="text-sm">Type</span>
-	<Select.Root type="single" value={value.type} onValueChange={(v) => {
-			if (!v) return;
-			value.type = v as LineType;
-			// Marks only needs a mark to show anything.
-			if (v === 'none' && (value.crossing === 'none' || value.crossing === 'gap')) value.crossing = 'plus';
-		}}>
+	<Select.Root type="single" value={value.type} onValueChange={pickType}>
 		<Select.Trigger size="sm" class="w-36" data-testid="line-type">{typeLabel}</Select.Trigger>
 		<Select.Content>
 			{#each LINE_TYPES as g, gi (g.group)}
@@ -48,40 +68,34 @@
 <ColorField label="Color" bind:value={value.color} />
 <SliderField label="Opacity" bind:value={value.opacity} unit="%" />
 {#if USES_SPACING.has(value.type)}
-	<div transition:slide={{ duration: 150 }}><SliderField label="Spacing" bind:value={value.spacing} min={2} max={Math.max(60, spaceMax)} /></div>
+	<div transition:slide={{ duration: 150 }}><SliderField label="Spacing" bind:value={value.spacing} min={2} max={sizeMax} /></div>
 {/if}
 {#if USES_AMPLITUDE.has(value.type)}
-	<div transition:slide={{ duration: 150 }}><SliderField label={value.type === 'wavy' || value.type === 'zigzag' ? 'Height' : 'Roughness'} bind:value={value.amplitude} max={40} /></div>
-{/if}
-<div class="flex items-center justify-between">
-	<span class="text-sm">Crossings</span>
-	<Select.Root type="single" value={value.crossing} onValueChange={(v) => v && (value.crossing = v as Mark)}>
-		<Select.Trigger size="sm" class="w-36" data-testid="line-crossing">{markLabel}</Select.Trigger>
-		<Select.Content>
-			{#each MARKS as m (m.value)}
-				<Select.Item value={m.value} label={m.label}>{m.label}</Select.Item>
-			{/each}
-		</Select.Content>
-	</Select.Root>
-</div>
-{#if hasLine}
-	<div class="flex items-center justify-between">
-		<span class="text-sm">Ornament</span>
-		<Select.Root type="single" value={value.ornament} onValueChange={(v) => v && (value.ornament = v as Ornament)}>
-			<Select.Trigger size="sm" class="w-36" data-testid="line-ornament">{ornLabel}</Select.Trigger>
-			<Select.Content>
-				{#each ORNAMENTS as m (m.value)}
-					<Select.Item value={m.value} label={m.label}>{m.label}</Select.Item>
-				{/each}
-			</Select.Content>
-		</Select.Root>
-	</div>
-{/if}
-{#if showMarkSize}
 	<div transition:slide={{ duration: 150 }}>
-		<SliderField label={value.crossing === 'gap' && !(hasLine && value.ornament !== 'none') ? 'Gap size' : 'Mark size'} bind:value={value.markSize} min={2} max={Math.max(60, spaceMax)} />
+		<SliderField label={value.type === 'wavy' || value.type === 'zigzag' ? 'Height' : 'Roughness'} bind:value={value.amplitude} max={40} />
 	</div>
 {/if}
+
+{@render heading('Crossings')}
+{@render picker('Mark', value.crossing === 'gap' ? 'none' : value.crossing, MARKS, (v) => (value.crossing = v as Mark), 'line-crossing')}
+{#if hasMark}
+	<div transition:slide={{ duration: 150 }}><SliderField label="Mark size" bind:value={value.markSize} min={2} max={sizeMax} /></div>
+{/if}
+{#if hasLine}
+	<SliderField label="Float" bind:value={value.inset} max={sizeMax} />
+{/if}
+
+{#if hasLine}
+	{@render heading('Ornament')}
+	{@render picker('Shape', value.ornament, ORNAMENTS, (v) => (value.ornament = v as Ornament), 'line-ornament')}
+	{#if value.ornament !== 'none'}
+		<div class="space-y-4" transition:slide={{ duration: 150 }}>
+			<SliderField label="Size" bind:value={value.ornamentSize} min={2} max={sizeMax} />
+			<SliderField label="Float" bind:value={value.ornamentFloat} max={sizeMax} />
+		</div>
+	{/if}
+{/if}
+
 <button
 	type="button"
 	class="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
@@ -102,7 +116,6 @@
 				</ToggleGroup.Root>
 			</div>
 		{/if}
-		<SliderField label="Float" bind:value={value.inset} max={Math.max(60, spaceMax)} />
 		<label class="flex cursor-pointer items-center justify-between" for="lines-fade">
 			<span class="text-sm">Fade at edges</span>
 			<Switch id="lines-fade" bind:checked={value.fade} size="sm" />

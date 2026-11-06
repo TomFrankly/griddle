@@ -216,6 +216,17 @@ export const DEFAULT_ADJUST: Adjust = { zoom: 1, ox: 0, oy: 0 };
 
 export const ZOOM_MAX = 5;
 
+/**
+ * The smallest zoom for an image in a cell. Filled images can zoom out until the whole image
+ * shows; fitted images already show it all.
+ */
+export function minZoom(imgW: number, imgH: number, cell: { w: number; h: number }, mode: 'fill' | 'fit'): number {
+	if (mode !== 'fill') return 1;
+	const cover = Math.max(cell.w / imgW, cell.h / imgH);
+	const contain = Math.min(cell.w / imgW, cell.h / imgH);
+	return cover > 0 ? Math.min(1, contain / cover) : 1;
+}
+
 /** Where an image is drawn so it covers (fill) or fits inside (fit) a cell, after zoom and pan. */
 export function placeImage(
 	imgW: number,
@@ -225,7 +236,7 @@ export function placeImage(
 	adjust: Adjust = DEFAULT_ADJUST
 ): Rect & { slackX: number; slackY: number } {
 	const base = mode === 'fill' ? Math.max(cell.w / imgW, cell.h / imgH) : Math.min(cell.w / imgW, cell.h / imgH);
-	const zoom = Math.min(ZOOM_MAX, Math.max(1, adjust.zoom || 1));
+	const zoom = Math.min(ZOOM_MAX, Math.max(minZoom(imgW, imgH, cell, mode), adjust.zoom || 1));
 	const k = base * zoom;
 	const w = imgW * k;
 	const h = imgH * k;

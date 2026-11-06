@@ -274,6 +274,41 @@
 		const next = dir > 0 ? steps.find((s) => s > viewZoom + 0.001) : [...steps].reverse().find((s) => s < viewZoom - 0.001);
 		zoomTo(next ?? viewZoom);
 	}
+	// Hold Space and drag to pan the zoomed preview.
+	let spaceHeld = $state(false);
+	let panning = $state(false);
+	const typing = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]');
+	function onSpace(e: KeyboardEvent) {
+		// Leave Space alone in fields and on focused controls, where it types or presses.
+		const onControl = !!(e.target as HTMLElement | null)?.closest?.('button, a, [role=switch], [role=slider], [role=menuitem], [role=option], [role=checkbox]');
+		if (e.code !== 'Space' || typing(e.target) || (onControl && !spaceHeld)) return;
+		e.preventDefault();
+		spaceHeld = e.type === 'keydown';
+		if (!spaceHeld) panning = false;
+	}
+	function startPan(e: PointerEvent) {
+		const el = scroller;
+		if (!el || e.button !== 0) return;
+		e.preventDefault();
+		const start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+		const target = e.currentTarget as HTMLElement;
+		target.setPointerCapture(e.pointerId);
+		panning = true;
+		const move = (ev: PointerEvent) => {
+			el.scrollLeft = start.left - (ev.clientX - start.x);
+			el.scrollTop = start.top - (ev.clientY - start.y);
+		};
+		const up = () => {
+			panning = false;
+			target.removeEventListener('pointermove', move);
+			target.removeEventListener('pointerup', up);
+			target.removeEventListener('pointercancel', up);
+		};
+		target.addEventListener('pointermove', move);
+		target.addEventListener('pointerup', up);
+		target.addEventListener('pointercancel', up);
+	}
+
 	/** Mod + scroll (and trackpad pinch, which arrives as Ctrl + scroll) zooms around the pointer. */
 	function wheelZoom(node: HTMLElement) {
 		const onWheel = (e: WheelEvent) => {
@@ -318,8 +353,11 @@
 		void fontTick;
 	});
 
+	// Divider lines sit in the middle of the gap, so with lines on each image gets half the gap on
+	// that side; a linked edge padding matches that half so every image has even space around it.
+	const linkedPadding = $derived(style.lines.on ? Math.round(gap / 2) : gap);
 	$effect(() => {
-		if (linkPadding) padding = gap;
+		if (linkPadding) padding = linkedPadding;
 	});
 
 	let showingExamples = $state(false);
@@ -989,7 +1027,11 @@
 	const labelOf = (list: { value: string; label: string }[], v: string) => list.find((x) => x.value === v)?.label ?? v;
 </script>
 
-<svelte:window ondragenter={onDragEnter} ondragleave={onDragLeave} ondragover={onDragOver} ondrop={onDrop} onpaste={onPaste} onkeydown={onKeydown} />
+<svelte:window
+	onkeydowncapture={onSpace}
+	onkeyupcapture={onSpace}
+	onblur={() => (spaceHeld = panning = false)}
+	ondragenter={onDragEnter} ondragleave={onDragLeave} ondragover={onDragOver} ondrop={onDrop} onpaste={onPaste} onkeydown={onKeydown} />
 
 <ModeWatcher />
 <Toaster position="bottom-center" />
@@ -1276,10 +1318,10 @@
 											</Toggle>
 										{/snippet}
 									</Tooltip.Trigger>
-									<Tooltip.Content>{linkPadding ? 'Matches the gap. Click to set it separately.' : 'Match the gap'}</Tooltip.Content>
+									<Tooltip.Content>{linkPadding ? (style.lines.on ? 'Matches the space between images and divider lines. Click to set it separately.' : 'Matches the gap. Click to set it separately.') : 'Match the gap'}</Tooltip.Content>
 								</Tooltip.Root>
 							</div>
-							<span class="text-muted-foreground text-sm tabular-nums">{linkPadding ? gap : padding} px</span>
+							<span class="text-muted-foreground text-sm tabular-nums">{linkPadding ? linkedPadding : padding} px</span>
 						</div>
 						<Slider
 							type="single"
@@ -1460,6 +1502,14 @@
 						</div>
 						</div>
 						</div>
+						{#if spaceHeld}
+							<div
+								class="absolute inset-0 z-30 {panning ? 'cursor-grabbing' : 'cursor-grab'}"
+								role="presentation"
+								data-testid="pan-surface"
+								onpointerdown={startPan}
+							></div>
+						{/if}
 						<div class="bg-background/90 absolute right-3 bottom-3 z-20 flex items-center rounded-md border shadow-sm backdrop-blur-sm" data-testid="zoom-controls">
 							<button type="button" class="hover:bg-accent flex size-7 items-center justify-center rounded-l-md disabled:opacity-40" aria-label="Zoom out" title="Zoom out ({mod}−)" disabled={viewZoom <= ZOOM_MIN} onclick={() => zoomStep(-1)}>
 								<MinusIcon class="size-3.5" />

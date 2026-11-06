@@ -43,7 +43,11 @@ export type LineStyle = {
 	crossing: Mark;
 	/** A motif in the middle of each line segment. */
 	ornament: Ornament;
+	/** Size of the crossing marks. */
 	markSize: number;
+	ornamentSize: number;
+	/** Clear space on each side of an ornament, in output pixels. */
+	ornamentFloat: number;
 	/** How far each segment stops short of crossings and edges, in output pixels. */
 	inset: number;
 	/** Fades the lines out toward the canvas edges. */
@@ -64,6 +68,8 @@ export const DEFAULT_LINES: LineStyle = {
 	crossing: 'none',
 	ornament: 'none',
 	markSize: 14,
+	ornamentSize: 14,
+	ornamentFloat: 4,
 	inset: 0,
 	fade: false,
 	gradient: false,
@@ -113,7 +119,6 @@ export const LINE_TYPES: { group: string; items: { value: LineType; label: strin
 
 export const MARKS: { value: Mark; label: string }[] = [
 	{ value: 'none', label: 'Nothing' },
-	{ value: 'gap', label: 'Gap' },
 	{ value: 'dot', label: 'Dot' },
 	{ value: 'plus', label: 'Crosshair' },
 	{ value: 'square', label: 'Square' },
@@ -241,9 +246,9 @@ export function drawMark(ctx: Ctx, kind: Mark | Ornament, x: number, y: number, 
 			break;
 		case 'diamond':
 			ctx.moveTo(x, y - s * 0.45);
-			ctx.lineTo(x + s * 0.32, y);
+			ctx.lineTo(x + s * 0.45, y);
 			ctx.lineTo(x, y + s * 0.45);
-			ctx.lineTo(x - s * 0.32, y);
+			ctx.lineTo(x - s * 0.45, y);
 			ctx.closePath();
 			break;
 		case 'star':
@@ -268,7 +273,7 @@ const repeats = (len: number, period: number) => {
 };
 
 /** Draws one piece in local space: it runs from (0, 0) to (len, 0). */
-function drawPiece(ctx: Ctx, len: number, l: LineStyle, seed: () => number) {
+function drawPiece(ctx: Ctx, len: number, l: LineStyle, seed: () => number, rot = 0) {
 	const w = Math.max(0.5, l.width);
 	const amp = Math.max(0, l.amplitude);
 	const period = Math.max(w * 1.5, l.spacing);
@@ -375,12 +380,22 @@ function drawPiece(ctx: Ctx, len: number, l: LineStyle, seed: () => number) {
 		case 'beaded':
 		case 'diamonds':
 		case 'stars': {
-			const thin = Math.max(0.75, w / 3);
-			ctx.fillRect(0, -thin / 2, len, thin);
+			// Stars stand alone; beads and diamonds hang on a thin line.
+			if (l.type !== 'stars') {
+				const thin = Math.max(0.75, w / 3);
+				ctx.fillRect(0, -thin / 2, len, thin);
+			}
 			const { n, step } = repeats(len, Math.max(period, w * 4));
 			const kind = l.type === 'beaded' ? 'dot' : l.type === 'diamonds' ? 'diamond' : 'star';
 			const size = l.type === 'beaded' ? w * 3 : w * 4;
-			for (let i = 0; i <= n; i++) drawMark(ctx, kind, i * step, 0, size, w);
+			for (let i = 0; i <= n; i++) {
+				// Keep stars upright on vertical lines.
+				ctx.save();
+				ctx.translate(i * step, 0);
+				ctx.rotate(-rot);
+				drawMark(ctx, kind, 0, 0, size, w);
+				ctx.restore();
+			}
 			return;
 		}
 		case 'hand':
@@ -464,16 +479,17 @@ export function drawLines(ctx: Ctx, layout: Layout, l: LineStyle) {
 			lc.translate(p.at, p.a);
 			lc.rotate(Math.PI / 2);
 		}
-		drawPiece(lc, p.b - p.a, l, seeded(p.a, p.at, p.b - p.a));
+		drawPiece(lc, p.b - p.a, l, seeded(p.a, p.at, p.b - p.a), p.axis === 'v' ? Math.PI / 2 : 0);
 		lc.restore();
 	}
 	const orn = l.ornament !== 'none' && l.type !== 'none' ? l.ornament : null;
 	if (orn) {
 		// Clear a little space in the middle of each cell-length run, then place the ornament.
-		const gap = l.markSize * 0.8;
-		const across = l.width * 4 + l.amplitude * 3 + 4;
+		const gap = l.ornamentSize * 0.9 + l.ornamentFloat * 2;
+		const across = Math.max(l.width * 4 + l.amplitude * 3 + 4, l.ornamentSize);
 		for (const p of cells) {
 			if (p.b - p.a < gap + l.width * 4) continue;
+			const size = l.ornamentSize;
 			const m = (p.a + p.b) / 2;
 			const [x, y] = p.axis === 'h' ? [m, p.at] : [p.at, m];
 			lc.save();
@@ -481,7 +497,7 @@ export function drawLines(ctx: Ctx, layout: Layout, l: LineStyle) {
 			if (p.axis === 'h') lc.fillRect(x - gap / 2, y - across / 2, gap, across);
 			else lc.fillRect(x - across / 2, y - gap / 2, across, gap);
 			lc.restore();
-			drawMark(lc, orn, x, y, l.markSize, l.width);
+			drawMark(lc, orn, x, y, size, l.width);
 		}
 	}
 	if (l.crossing !== 'none' && l.crossing !== 'gap') for (const c of pts) drawMark(lc, l.crossing, c.x, c.y, l.markSize, l.width);

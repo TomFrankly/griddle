@@ -16,7 +16,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import Stepper from './stepper.svelte';
 	import RichText from './rich-text.svelte';
-	import { placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
+	import { minZoom, placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
 	import type { FitMode, GridImage } from '$lib/render';
 	import type { CaptionStyle } from '$lib/captions';
 
@@ -125,6 +125,7 @@
 		onfiles(e.dataTransfer.files);
 	}
 	const place = $derived(placeImage(image.width, image.height, rect, fit, image.adjust));
+	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, rect, fit) * 100) / 100);
 	const movable = $derived(place.slackX > 0.5 || place.slackY > 0.5);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
 	const clamp = (n: number) => Math.min(1, Math.max(-1, n));
@@ -158,7 +159,7 @@
 		if (e.ctrlKey || e.metaKey) return;
 		e.preventDefault();
 		const z = image.adjust.zoom * Math.exp(-e.deltaY * 0.002);
-		image.adjust.zoom = Math.min(ZOOM_MAX, Math.max(1, z));
+		image.adjust.zoom = Math.min(ZOOM_MAX, Math.max(zoomMin, z));
 	}
 
 	function reset() {
@@ -248,7 +249,7 @@
 						<span>Zoom</span>
 						<button type="button" class="text-muted-foreground hover:text-foreground text-xs disabled:opacity-40" disabled={!adjusted} onclick={reset}>Reset</button>
 					</div>
-					<Slider type="single" min={1} max={ZOOM_MAX} step={0.01} bind:value={image.adjust.zoom} aria-label="Zoom image {index + 1}" />
+					<Slider type="single" min={zoomMin} max={ZOOM_MAX} step={0.01} bind:value={image.adjust.zoom} aria-label="Zoom image {index + 1}" />
 				</div>
 				{#if hasCaptions && captions}
 					{#if captions.title.on}
@@ -395,7 +396,7 @@
 		>
 			<Slider
 				type="single"
-				min={1}
+				min={zoomMin}
 				max={ZOOM_MAX}
 				step={0.01}
 				bind:value={image.adjust.zoom}

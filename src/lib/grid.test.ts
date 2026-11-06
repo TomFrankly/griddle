@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { autoGrid, computeLayout, placeImage, placeSlots, randomSpans } from './grid';
+import { autoGrid, computeLayout, minZoom, placeImage, placeSlots, randomSpans } from './grid';
 
 const base = { cols: 3, rows: 3, aspect: 1, longEdge: 1000, gutter: 10, padding: 10 };
 
@@ -175,5 +175,23 @@ describe('randomSpans', () => {
 			const g = autoGrid(spans, 1);
 			expect(placeSlots(n, spans, g.cols, g.rows)).toHaveLength(n);
 		}
+	});
+});
+
+describe('zooming out a filled image', () => {
+	const cell = { x: 0, y: 0, w: 200, h: 100 };
+	it('lets a filled image shrink until all of it shows', () => {
+		expect(minZoom(100, 100, cell, 'fill')).toBeCloseTo(0.5);
+		const p = placeImage(100, 100, cell, 'fill', { zoom: 0.5, ox: 0, oy: 0 });
+		expect(p.h).toBeCloseTo(100);
+		expect(p.w).toBeCloseTo(100);
+		expect(p.x).toBeCloseTo(50);
+	});
+	it('stops at the whole image', () => {
+		const p = placeImage(100, 100, cell, 'fill', { zoom: 0.1, ox: 0, oy: 0 });
+		expect(p.h).toBeCloseTo(100);
+	});
+	it('does not change fitted images', () => {
+		expect(minZoom(100, 100, cell, 'fit')).toBe(1);
 	});
 });
