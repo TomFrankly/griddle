@@ -6,6 +6,7 @@
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { ModeWatcher, setMode, userPrefersMode } from 'mode-watcher';
 	import { toast } from 'svelte-sonner';
+	import { watchForUpdates } from '$lib/update-check';
 	import { Toaster } from '$lib/components/ui/sonner/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
@@ -1073,7 +1074,23 @@
 		};
 		document.addEventListener('visibilitychange', saveOnLeave);
 		window.addEventListener('pagehide', hide);
+		const stopWatching = watchForUpdates(() =>
+			toast('A new version of Griddle is ready', {
+				description: 'Your grid is saved and will be here after the reload.',
+				duration: Infinity,
+				action: {
+					label: 'Reload',
+					onClick: () => {
+						flush();
+						persistNow();
+						// Give IndexedDB a moment to finish writing before the page goes away.
+						setTimeout(() => location.reload(), 300);
+					}
+				}
+			})
+		);
 		return () => {
+			stopWatching();
 			document.removeEventListener('visibilitychange', saveOnLeave);
 			window.removeEventListener('pagehide', hide);
 		};
