@@ -33,6 +33,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import ArrowLeftRightIcon from '@lucide/svelte/icons/arrow-left-right';
 	import LocateFixedIcon from '@lucide/svelte/icons/locate-fixed';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
 	import PanelBottomIcon from '@lucide/svelte/icons/panel-bottom';
@@ -899,20 +900,24 @@
 	/** Where a dragged thumbnail would go: before the image at this index (length means last). */
 	let insertAt = $state<number | null>(null);
 	// Moving images by dragging them on the grid itself
-	/** `target` is the cell the pointer is nearest; `after` says which side of it the image goes. */
-	let lift = $state<{ from: number; x: number; y: number; target: number | null; after: boolean } | null>(null);
+	/**
+	 * `target` is the cell the pointer is nearest; `after` says which side of it the image goes, or
+	 * `swap` that it trades places with that cell's image (pointer over the cell's middle).
+	 */
+	type Hit = { target: number; after: boolean; swap: boolean };
+	let lift = $state<({ from: number; x: number; y: number } & Partial<Hit>) | null>(null);
 	let previewEl = $state<HTMLDivElement>();
 	/** The insertion line beside the target cell, centred in the gap, in preview pixels. */
 	const liftLine = $derived.by(() => {
-		if (!lift || lift.target === null) return null;
+		if (!lift || lift.target === undefined || lift.swap) return null;
 		const c = displayCells[lift.target];
 		if (!c) return null;
 		const g = (gap * k) / 2;
 		return { x: lift.after ? c.x + c.w + g : c.x - g, y: c.y, h: c.h };
 	});
 	/** The cell nearest a point, preferring cells in the same row band, and which side the point is on. */
-	function nearestCell(px: number, py: number): { target: number; after: boolean } | null {
-		let best: { target: number; after: boolean } | null = null;
+	function nearestCell(px: number, py: number): Hit | null {
+		let best: Hit | null = null;
 		let bestD = Infinity;
 		for (let i = 0; i < displayCells.length; i++) {
 			const c = displayCells[i];
@@ -923,18 +928,21 @@
 			const d = dy * 4 + dx;
 			if (d < bestD) {
 				bestD = d;
-				best = { target: i, after: px > c.x + c.w / 2 };
+				// The middle of a cell swaps; its outer quarters insert beside it.
+				const inside = d === 0 && px > c.x + c.w * 0.25 && px < c.x + c.w * 0.75;
+				best = { target: i, after: px > c.x + c.w / 2, swap: inside };
 			}
 		}
 		return best;
 	}
 	function startLift(e: PointerEvent, from: number) {
-		lift = { from, x: e.clientX, y: e.clientY, target: null, after: false };
+		lift = { from, x: e.clientX, y: e.clientY };
 		const move = (ev: PointerEvent) => {
 			if (!lift || !previewEl) return;
 			const box = previewEl.getBoundingClientRect();
 			const hit = nearestCell(ev.clientX - box.left, ev.clientY - box.top);
-			lift = { ...lift, x: ev.clientX, y: ev.clientY, target: hit?.target ?? null, after: hit?.after ?? false };
+			lift = { from: lift.from, x: ev.clientX, y: ev.clientY, ...hit };
+			if (lift.swap && lift.target === lift.from) lift.swap = false;
 		};
 		const up = () => {
 			window.removeEventListener('pointermove', move);
@@ -942,7 +950,20 @@
 			window.removeEventListener('pointercancel', cancel);
 			const l = lift;
 			lift = null;
-			if (!l || l.target === null) return;
+			if (!l || l.target === undefined) return;
+			if (l.swap) {
+				// The two images trade places; each slot keeps its size.
+				const next = [...images];
+				const a = next[l.from];
+				const b = next[l.target];
+				const spanA = { ...a.span };
+				a.span = { ...b.span };
+				b.span = spanA;
+				next[l.from] = b;
+				next[l.target] = a;
+				images = next;
+				return;
+			}
 			const at = l.after ? l.target + 1 : l.target;
 			const to = at > l.from ? at - 1 : at;
 			if (to === l.from) return;
@@ -1665,6 +1686,19 @@
 									/>
 								{/if}
 							{/each}
+							{#if lift?.swap && lift.target !== undefined && displayCells[lift.target]}
+								{@const c = displayCells[lift.target]}
+								<div
+									class="ring-primary bg-primary/15 pointer-events-none absolute z-20 flex items-end justify-center pb-3 ring-2 ring-inset"
+									style:left="{c.x}px"
+									style:top="{c.y}px"
+									style:width="{c.w}px"
+									style:height="{c.h}px"
+									data-testid="grid-swap-target"
+								>
+									<span class="bg-primary text-primary-foreground flex items-center gap-1 px-2 py-0.5 text-xs font-medium"><ArrowLeftRightIcon class="size-3.5" />Swap</span>
+								</div>
+							{/if}
 							{#if liftLine}
 								<div
 									class="bg-primary ring-background pointer-events-none absolute z-20 w-1 -translate-x-1/2 ring-2"

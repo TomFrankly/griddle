@@ -239,26 +239,31 @@ export function placeImage(
 	adjust: Adjust = DEFAULT_ADJUST,
 	/** Lets the image move well past the cell's edges, uncovering what's behind it. */
 	free = false
-): Rect & { slackX: number; slackY: number } {
+): Rect & { slackX: number; slackY: number; limitX: number; limitY: number } {
 	const base = mode === 'fill' ? Math.max(cell.w / imgW, cell.h / imgH) : Math.min(cell.w / imgW, cell.h / imgH);
 	const zoom = Math.min(ZOOM_MAX, Math.max(minZoom(imgW, imgH, cell, mode), adjust.zoom || 1));
 	const k = base * zoom;
 	const w = imgW * k;
 	const h = imgH * k;
-	// Positive slack is overflow to pan across; negative slack is free space to move the
-	// image around in when it is smaller than its cell.
-	// Free images can go almost anywhere: the overlap with the cell shrinks to a tenth of the
-	// cell and image sizes combined before they stop.
-	const slackX = free ? -(cell.w + w) * 0.8 : w - cell.w;
-	const slackY = free ? -(cell.h + h) * 0.8 : h - cell.h;
-	const ox = Math.min(1, Math.max(-1, adjust.ox || 0));
-	const oy = Math.min(1, Math.max(-1, adjust.oy || 0));
+	// An offset of 1 moves the image by `reach` pixels, the same with or without `free`, so
+	// switching it doesn't move anything. At full reach only a sliver still overlaps the cell.
+	const reachX = (cell.w + w) * 0.4;
+	const reachY = (cell.h + h) * 0.4;
+	// Without `free`, the image only pans across its overflow, or moves within the cell when it
+	// is smaller, so it never uncovers what's behind it.
+	const limitX = free ? 1 : Math.min(1, Math.abs(w - cell.w) / 2 / reachX);
+	const limitY = free ? 1 : Math.min(1, Math.abs(h - cell.h) / 2 / reachY);
+	const ox = Math.min(limitX, Math.max(-limitX, adjust.ox || 0));
+	const oy = Math.min(limitY, Math.max(-limitY, adjust.oy || 0));
 	return {
-		x: cell.x + (cell.w - w) / 2 - (ox * slackX) / 2,
-		y: cell.y + (cell.h - h) / 2 - (oy * slackY) / 2,
+		x: cell.x + (cell.w - w) / 2 - ox * reachX,
+		y: cell.y + (cell.h - h) / 2 - oy * reachY,
 		w,
 		h,
-		slackX,
-		slackY
+		// Pixels of travel across the whole -1…1 range; dragging divides by these.
+		slackX: reachX * 2,
+		slackY: reachY * 2,
+		limitX,
+		limitY
 	};
 }

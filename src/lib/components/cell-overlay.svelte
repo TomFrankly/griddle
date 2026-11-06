@@ -133,11 +133,11 @@
 	const box = $derived(area ?? rect);
 	const place = $derived(placeImage(image.width, image.height, box, fit, image.adjust, free));
 	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
-	const movable = $derived(Math.abs(place.slackX) > 0.5 || Math.abs(place.slackY) > 0.5);
+	const movable = $derived(place.limitX > 0.001 || place.limitY > 0.001);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
 	// Hover controls are 28 px round; this keeps them inside the cell's rounded corners.
 	const controlInset = $derived(Math.max(6, Math.round((Math.min(radius, Math.min(rect.w, rect.h) / 2) - 14) * (1 - Math.SQRT1_2))));
-	const clamp = (n: number) => Math.min(1, Math.max(-1, n));
+	const clampTo = (n: number, lim: number) => Math.min(lim, Math.max(-lim, n));
 
 	let pressAt: { x: number; y: number } | null = null;
 	function onClick(e: MouseEvent) {
@@ -157,10 +157,10 @@
 		el.setPointerCapture(e.pointerId);
 		dragging = true;
 		const start = { x: e.clientX, y: e.clientY, ox: image.adjust.ox, oy: image.adjust.oy };
-		const { slackX, slackY } = place;
+		const { slackX, slackY, limitX, limitY } = place;
 		const move = (ev: PointerEvent) => {
-			if (Math.abs(slackX) > 0.5) image.adjust.ox = clamp(start.ox - (2 * (ev.clientX - start.x)) / slackX);
-			if (Math.abs(slackY) > 0.5) image.adjust.oy = clamp(start.oy - (2 * (ev.clientY - start.y)) / slackY);
+			if (limitX > 0.001) image.adjust.ox = clampTo(start.ox - (2 * (ev.clientX - start.x)) / slackX, limitX);
+			if (limitY > 0.001) image.adjust.oy = clampTo(start.oy - (2 * (ev.clientY - start.y)) / slackY, limitY);
 		};
 		const up = () => {
 			dragging = false;
@@ -202,9 +202,8 @@
 		const m = d[e.key];
 		if (!m) return;
 		e.preventDefault();
-		// Panning a large image and moving a small one go opposite ways for the same arrow.
-		image.adjust.ox = clamp(image.adjust.ox - m[0] * (place.slackX < 0 ? -1 : 1));
-		image.adjust.oy = clamp(image.adjust.oy - m[1] * (place.slackY < 0 ? -1 : 1));
+		image.adjust.ox = clampTo(image.adjust.ox - m[0], place.limitX);
+		image.adjust.oy = clampTo(image.adjust.oy - m[1], place.limitY);
 	}
 </script>
 
