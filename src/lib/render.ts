@@ -82,6 +82,8 @@ export type CellStyle = {
 	border: { on: boolean; width: number; color: string; opacity: number };
 	shadow: { on: boolean; strength: number; distance: number; softness: number };
 	lines: { on: boolean; width: number; color: string; opacity: number };
+	/** A box behind each image, filling its cell. Shows through transparent images. */
+	fill: { on: boolean; color: string; opacity: number; padding: number };
 	captions: CaptionStyle;
 };
 
@@ -90,18 +92,30 @@ export const DEFAULT_STYLE: CellStyle = {
 	border: { on: false, width: 4, color: '#ffffff', opacity: 100 },
 	shadow: { on: false, strength: 35, distance: 8, softness: 24 },
 	lines: { on: false, width: 2, color: '#000000', opacity: 25 },
+	fill: { on: false, color: '#f0f0f0', opacity: 100, padding: 0 },
 	captions: DEFAULT_CAPTIONS
 };
 
-type PlanItem = { cell: Rect; place: Rect; visible: Rect; radius: number };
+/** `visible` is the box that gets corners, shadow and border; `clip` is where the image may draw. */
+type PlanItem = { cell: Rect; place: Rect; visible: Rect; clip: Rect; radius: number };
 type Sized = { width: number; height: number; adjust: Adjust };
 
-/** Where each image lands: the part of the cell it covers (all of it for fill) and its corner radius. */
+/**
+ * Where each image lands: the part of the cell it covers (all of it for fill) and its corner
+ * radius. With a cell background the whole cell is the visible box, and the image sits inside it.
+ */
 function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: CellStyle): (PlanItem | null)[] {
+	const boxed = style.fill.on;
 	return layout.cells.map((cell, i) => {
 		const img = sizes[i];
 		if (!img) return null;
-		const place = placeImage(img.width, img.height, cell, fit, img.adjust);
+		const pad = boxed ? Math.max(0, Math.min(style.fill.padding, cell.w / 2 - 1, cell.h / 2 - 1)) : 0;
+		const inner = { x: cell.x + pad, y: cell.y + pad, w: cell.w - 2 * pad, h: cell.h - 2 * pad };
+		const place = placeImage(img.width, img.height, inner, fit, img.adjust);
+		if (boxed) {
+			const pct = style.corners.on ? Math.min(100, Math.max(0, style.corners.radius)) : 0;
+			return { cell, place, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) };
+		}
 		const x = Math.max(cell.x, place.x);
 		const y = Math.max(cell.y, place.y);
 		const visible = {
@@ -112,8 +126,21 @@ function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: Cell
 		};
 		const pct = style.corners.on ? Math.min(100, Math.max(0, style.corners.radius)) : 0;
 		const radius = (pct / 100) * (Math.min(visible.w, visible.h) / 2);
-		return { cell, place, visible, radius };
+		return { cell, place, visible, clip: visible, radius };
 	});
+}
+
+function drawFills(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle) {
+	const f = style.fill;
+	if (!f.on || f.opacity <= 0) return;
+	ctx.save();
+	ctx.fillStyle = withAlpha(f.color, f.opacity);
+	for (const it of items) {
+		if (!it) continue;
+		shape(ctx, it.visible, it.radius);
+		ctx.fill();
+	}
+	ctx.restore();
 }
 
 function shape(ctx: Ctx, r: Rect, radius: number) {
@@ -153,9 +180,10 @@ function drawShadows(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle, sca
  */
 function drawImage(ctx: Ctx, it: PlanItem, source: CanvasImageSource, inset = 0) {
 	ctx.save();
-	const v = it.visible;
+	const v = it.clip;
 	const d = Math.min(inset, v.w / 2, v.h / 2);
-	shape(ctx, { x: v.x + d, y: v.y + d, w: v.w - 2 * d, h: v.h - 2 * d }, Math.max(0, it.radius - d));
+	const r = Math.max(0, it.radius - d - (v.x - it.visible.x));
+	shape(ctx, { x: v.x + d, y: v.y + d, w: v.w - 2 * d, h: v.h - 2 * d }, r);
 	ctx.clip();
 	ctx.imageSmoothingEnabled = true;
 	ctx.imageSmoothingQuality = 'high';
@@ -235,6 +263,7 @@ export function drawGrid(
 	const imgs = layout.cells.map((_, i) => getImage(i));
 	const items = plan(layout, imgs, opts.fit, opts.style);
 	drawShadows(ctx, items, opts.style, opts.scale);
+	drawFills(ctx, items, opts.style);
 	const inset = borderInset(opts.style, opts.scale);
 	items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
 	drawBorders(ctx, items, opts.style);
@@ -300,6 +329,7 @@ export async function renderFull(
 	drawBackground(ctx, layout.width, layout.height, bg);
 	const items = plan(layout, layout.cells.map((_, i) => images[i] ?? null), opts.fit, opts.style);
 	drawShadows(ctx, items, opts.style, 1);
+	drawFills(ctx, items, opts.style);
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i];
 		if (!it) continue;
@@ -358,12 +388,14 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 	if (opts.background.kind !== 'none') push(layer('Background', full, (ctx) => drawBackground(ctx, W, H, opts.background)));
 	if (opts.style.shadow.on && opts.style.shadow.strength > 0) push(layer('Shadows', full, (ctx) => drawShadows(ctx, items, opts.style, 1)));
 
+	if (opts.style.fill.on && opts.style.fill.opacity > 0) push(layer('Cell backgrounds', full, (ctx) => drawFills(ctx, items, opts.style)));
+
 	const imageLayers: PsdLayer[] = [];
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i];
 		if (!it) continue;
 		const bmp = await decode(images[i].file);
-		const l = layer(`${i + 1} ${images[i].name}`, it.visible, (ctx) => drawImage(ctx, it, bmp, borderInset(opts.style, 1)));
+		const l = layer(`${i + 1} ${images[i].name}`, it.clip, (ctx) => drawImage(ctx, it, bmp, borderInset(opts.style, 1)));
 		bmp.close();
 		if (l) imageLayers.push(l);
 	}

@@ -97,7 +97,7 @@
 			</Button>
 		{/snippet}
 	</Popover.Trigger>
-	<Popover.Content class="w-64 p-0" align="end">
+	<Popover.Content class="w-64 gap-0 p-0" align="end">
 		<div class="flex items-center gap-2 border-b px-2.5">
 			<SearchIcon class="text-muted-foreground size-4 shrink-0" />
 			<input
@@ -121,7 +121,7 @@
 					role="option"
 					aria-selected={f.family === value}
 					data-i={i}
-					class="hover:bg-accent flex w-full items-center gap-2 px-2 py-1.5 text-left"
+					class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left"
 					class:bg-accent={i === highlighted}
 					onmouseenter={() => (highlighted = i)}
 					onclick={() => pick(f.family)}

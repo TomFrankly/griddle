@@ -37,12 +37,17 @@
 </script>
 
 {#snippet item(l: NamedLook, deletable: boolean)}
-	<div class="group hover:bg-accent flex items-center">
-		<button type="button" class="flex-1 px-2 py-1.5 text-left text-sm" onclick={() => apply(l)} data-testid="look-{l.id}">{l.name}</button>
+	<div class="group hover:bg-accent focus-within:bg-accent flex items-center rounded-sm">
+		<button
+			type="button"
+			class="flex-1 rounded-sm px-2 py-1.5 text-left text-sm outline-none"
+			onclick={() => apply(l)}
+			data-testid="look-{l.id}">{l.name}</button
+		>
 		{#if deletable}
 			<button
 				type="button"
-				class="text-muted-foreground hover:text-foreground mr-1 hidden size-6 items-center justify-center group-hover:flex focus-visible:flex"
+				class="text-muted-foreground hover:text-foreground mr-1 hidden size-6 items-center justify-center rounded-sm group-hover:flex focus-visible:flex"
 				aria-label="Delete {l.name}"
 				onclick={() => remove(l.id)}
 			>
@@ -61,20 +66,18 @@
 			</Button>
 		{/snippet}
 	</Popover.Trigger>
-	<Popover.Content class="w-60 p-0" align="end">
-		<div class="text-muted-foreground px-3 pt-2.5 pb-1 text-[11px]">Built in</div>
-		<div class="px-1">
+	<Popover.Content class="w-60 gap-0 p-0" align="end">
+		<div class="p-1">
+			<div class="text-muted-foreground px-2 py-1.5 text-xs font-medium">Built in</div>
 			{#each BUILT_IN_LOOKS as l (l.id)}{@render item(l, false)}{/each}
-		</div>
-		{#if saved.length}
-			<div class="text-muted-foreground px-3 pt-2.5 pb-1 text-[11px]">Saved</div>
-			<div class="px-1">
+			{#if saved.length}
+				<div class="text-muted-foreground mt-1 px-2 py-1.5 text-xs font-medium">Saved</div>
 				{#each saved as l (l.id)}{@render item(l, true)}{/each}
-			</div>
-		{/if}
-		<form class="mt-2 flex gap-1.5 border-t p-2" onsubmit={save}>
+			{/if}
+		</div>
+		<form class="flex gap-1.5 border-t p-2" onsubmit={save}>
 			<input
-				class="border-input placeholder:text-muted-foreground h-8 min-w-0 flex-1 border bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
+				class="border-input placeholder:text-muted-foreground focus-visible:border-ring h-8 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-sm outline-none"
 				placeholder="Name this look"
 				bind:value={name}
 				aria-label="Look name"

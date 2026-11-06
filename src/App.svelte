@@ -786,6 +786,19 @@
 		await addFiles(await exampleFiles(), true);
 	}
 
+	const DEV = import.meta.env.DEV;
+	async function loadPokemon() {
+		loading += 1;
+		try {
+			const { pokemonFiles } = await import('$lib/dev-samples');
+			const files = await pokemonFiles(25);
+			if (!files.length) toast.error("Couldn't reach PokeAPI");
+			await addFiles(files);
+		} finally {
+			loading -= 1;
+		}
+	}
+
 	onDestroy(() => {
 		clearTimeout(pending);
 		pool.forEach(release);
@@ -1060,6 +1073,11 @@
 				<ToggleSection title="Rounded corners" bind:on={style.corners.on}>
 					<SliderField label="Radius" bind:value={style.corners.radius} unit="%" />
 				</ToggleSection>
+				<ToggleSection title="Cell background" bind:on={style.fill.on}>
+					<ColorField label="Color" bind:value={style.fill.color} />
+					<SliderField label="Opacity" bind:value={style.fill.opacity} unit="%" />
+					<SliderField label="Image padding" bind:value={style.fill.padding} max={spaceMax} />
+				</ToggleSection>
 				<ToggleSection title="Border" bind:on={style.border.on}>
 					<SliderField label="Width" bind:value={style.border.width} min={1} max={Math.max(20, Math.round(longEdge / 40))} />
 					<ColorField label="Color" bind:value={style.border.color} />
@@ -1287,7 +1305,12 @@
 								<span class="text-sm font-medium">Drop images here</span>
 								<span class="text-muted-foreground text-xs">or click to choose</span>
 							</button>
-							<Button variant="ghost" size="sm" onclick={loadSamples} disabled={loading > 0} data-testid="load-samples">Load samples</Button>
+							<div class="flex gap-1">
+								<Button variant="ghost" size="sm" onclick={loadSamples} disabled={loading > 0} data-testid="load-samples">Load samples</Button>
+								{#if DEV}
+									<Button variant="ghost" size="sm" onclick={loadPokemon} disabled={loading > 0} data-testid="load-pokemon">Load 25 Pokémon</Button>
+								{/if}
+							</div>
 						</div>
 					{/if}
 					{#if loading}

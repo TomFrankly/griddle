@@ -36,6 +36,7 @@ export function scaleStyle(s: CellStyle, k: number): CellStyle {
 		border: { ...s.border, width: r(s.border.width, k, 1) },
 		shadow: { ...s.shadow, distance: r(s.shadow.distance, k), softness: r(s.shadow.softness, k) },
 		lines: { ...s.lines, width: r(s.lines.width, k, 1) },
+		fill: { ...s.fill, padding: r(s.fill.padding, k) },
 		captions: { ...c, title: text(c.title), desc: text(c.desc) }
 	};
 }
@@ -62,6 +63,7 @@ export function withDefaults(s: Partial<CellStyle>): CellStyle {
 		border: { ...d.border, ...s.border },
 		shadow: { ...d.shadow, ...s.shadow },
 		lines: { ...d.lines, ...s.lines },
+		fill: { ...d.fill, ...s.fill },
 		captions: {
 			...d.captions,
 			...s.captions,

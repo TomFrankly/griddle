@@ -181,18 +181,26 @@ export function autoGrid(spans: Span[], aspect: number, target = 1): { cols: num
 export function randomSpans(count: number, aspect: number, target = 1, random = Math.random): Span[] {
 	const n = Math.max(0, Math.floor(count));
 	if (n < 2) return Array.from({ length: n }, () => ({ w: 1, h: 1 }));
-	const shapes: Span[] = n >= 5 ? [{ w: 2, h: 2 }, { w: 2, h: 1 }, { w: 1, h: 2 }, { w: 2, h: 2 }] : [{ w: 2, h: 1 }, { w: 1, h: 2 }];
+	// Any shape up to 3×3 that isn't too big for the number of images; ones the grid can't hold
+	// are filtered out below.
+	const shapes: Span[] = [];
+	for (let w = 1; w <= 3; w++) for (let h = 1; h <= 3; h++) if (w * h > 1 && w * h <= Math.max(2, n / 2)) shapes.push({ w, h });
 	let best: { spans: Span[]; score: number } | null = null;
-	for (let t = 0; t < 40; t++) {
+	for (let t = 0; t < 60; t++) {
 		const spans: Span[] = Array.from({ length: n }, () => ({ w: 1, h: 1 }));
 		const big = 1 + Math.floor(random() * Math.max(1, Math.round(n / 4)));
 		for (let k = 0; k < big; k++) spans[Math.floor(random() * n)] = { ...shapes[Math.floor(random() * shapes.length)] };
 		const g = autoGrid(spans, aspect, target);
+		// A span wider or taller than the grid gets cut, so skip those mixes.
+		if (spans.some((s) => s.w > g.cols || s.h > g.rows)) continue;
 		const area = spans.reduce((a, s) => a + s.w * s.h, 0);
-		// Fewer holes is better; a little noise keeps repeated presses varied.
-		const score = g.cols * g.rows - area + random() * 0.5;
+		const kinds = new Set(spans.filter((s) => s.w * s.h > 1).map((s) => `${s.w}x${s.h}`)).size;
+		// Fewer holes is better, a mix of shapes reads better, and a little noise keeps repeated
+		// presses varied.
+		const score = g.cols * g.rows - area - 0.75 * kinds + random() * 1.5;
 		if (!best || score < best.score) best = { spans, score };
 	}
+	if (!best) return Array.from({ length: n }, () => ({ w: 1, h: 1 }));
 	return best!.spans;
 }
 
