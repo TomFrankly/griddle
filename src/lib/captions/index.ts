@@ -23,6 +23,8 @@ export type TextStyle = {
 	padBottom: number;
 	/** Space kept clear at the cell's left and right edges, in output pixels. */
 	padSide: number;
+	/** Sizes the text to fill the width within `lines` lines, never above `size`. */
+	fit: boolean;
 	/** Lines kept before the text is cut off with an ellipsis. */
 	lines: number;
 	shadow: TextShadow;
@@ -51,8 +53,8 @@ export const DEFAULT_CAPTIONS: CaptionStyle = {
 	order: [...DEFAULT_ORDER],
 	align: 'center',
 	fade: { on: false, color: '#000000', opacity: 55, length: 60 },
-	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, padSide: 16, lines: 1, shadow: { ...NO_SHADOW } },
-	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, padSide: 16, lines: 2, shadow: { ...NO_SHADOW } }
+	title: { on: true, font: 'Inter', size: 36, color: '#111111', position: 'below', padTop: 16, padBottom: 4, padSide: 16, fit: false, lines: 1, shadow: { ...NO_SHADOW } },
+	desc: { on: true, font: 'Inter', size: 24, color: '#555555', position: 'below', padTop: 4, padBottom: 16, padSide: 16, fit: false, lines: 2, shadow: { ...NO_SHADOW } }
 };
 
 export const LINE_HEIGHT = 1.3;
@@ -175,7 +177,7 @@ const fontFor = (r: Run, s: TextStyle) =>
 	`${r.italic ? 'italic ' : ''}${r.bold ? 700 : 400} ${s.size}px "${cssFamily(s.font)}", system-ui, sans-serif`;
 
 /** Breaks runs into lines no wider than `maxW`, cutting the last kept line with an ellipsis. */
-function layoutText(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): Line[] {
+function layoutText(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): Line[] & { cut?: boolean } {
 	const lines: Line[] = [];
 	const limit = Math.max(1, s.lines);
 	const measure = (r: Run, t: string) => {
@@ -209,6 +211,7 @@ function layoutText(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): Line[
 	}
 	if (lines.length > limit) lines.length = limit;
 	const last = lines[lines.length - 1];
+	const cut = !!last && (truncated || lines.some((l) => l.width > maxW));
 	if (last && (truncated || last.width > maxW)) {
 		// Trim characters until the line and an ellipsis fit.
 		while (last.pieces.length) {
@@ -231,12 +234,39 @@ function layoutText(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): Line[
 		}
 		last.width = last.pieces.reduce((t, p) => t + p.width, 0);
 	}
-	return lines;
+	return Object.assign(lines, { cut });
 }
 
-function drawBlock(ctx: Ctx, text: RichText, s: TextStyle, box: Rect, align: CaptionStyle['align'], scale: number) {
+const FIT_MIN = 6;
+const fitCache = new Map<string, number>();
+/** The largest size up to `s.size` at which the text fits the width in `s.lines` lines. */
+function fitSize(ctx: Ctx, text: RichText, s: TextStyle, maxW: number): number {
+	const key = `${s.font}|${s.size}|${s.lines}|${Math.round(maxW)}|${JSON.stringify(text)}`;
+	const hit = fitCache.get(key);
+	if (hit) return hit;
+	const fits = (size: number) => !layoutText(ctx, text, { ...s, size }, maxW).cut;
+	let size = s.size;
+	if (!fits(size)) {
+		let lo = Math.min(FIT_MIN, s.size);
+		let hi = s.size;
+		while (hi - lo > 0.25) {
+			const mid = (lo + hi) / 2;
+			if (fits(mid)) lo = mid;
+			else hi = mid;
+		}
+		size = lo;
+	}
+	if (fitCache.size > 500) fitCache.clear();
+	fitCache.set(key, size);
+	return size;
+}
+
+function drawBlock(ctx: Ctx, text: RichText, style: TextStyle, box: Rect, align: CaptionStyle['align'], scale: number) {
+	const s = style.fit ? { ...style, size: fitSize(ctx, text, style, box.w) } : style;
 	const lines = layoutText(ctx, text, s, box.w);
 	const lh = s.size * LINE_HEIGHT;
+	// Fitted text that came out smaller sits in the middle of the space kept for it.
+	const dy = style.fit ? Math.max(0, (box.h - lines.length * lh) / 2) : 0;
 	ctx.save();
 	ctx.textBaseline = 'alphabetic';
 	ctx.fillStyle = s.color;
@@ -248,7 +278,7 @@ function drawBlock(ctx: Ctx, text: RichText, s: TextStyle, box: Rect, align: Cap
 	}
 	lines.forEach((line, i) => {
 		let x = box.x + (align === 'left' ? 0 : align === 'right' ? box.w - line.width : (box.w - line.width) / 2);
-		const base = box.y + i * lh + (lh - s.size) / 2 + s.size * 0.8;
+		const base = box.y + dy + i * lh + (lh - s.size) / 2 + s.size * 0.8;
 		for (const p of line.pieces) {
 			ctx.font = fontFor(p, s);
 			ctx.fillText(p.text, x, base);

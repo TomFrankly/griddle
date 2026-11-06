@@ -11,6 +11,7 @@
 	import SliderField from './slider-field.svelte';
 	import ColorField from './color-field.svelte';
 	import Stepper from './stepper.svelte';
+	import InfoTip from './info-tip.svelte';
 	import type { TextStyle } from '$lib/captions';
 
 	let { title, value = $bindable(), maxSize }: { title: string; value: TextStyle; maxSize: number } = $props();
@@ -35,7 +36,20 @@
 				<span class="text-sm">Font</span>
 				<FontPicker bind:value={value.font} label="{title} font" />
 			</div>
-			<SliderField label="Size" bind:value={value.size} min={8} max={maxSize} />
+			<SliderField label={value.fit ? 'Max size' : 'Size'} bind:value={value.size} min={8} max={maxSize} />
+			<label class="flex cursor-pointer items-center justify-between" for="{id}-fit">
+				<span class="flex items-center gap-1.5 text-sm">
+					Fit text
+					<InfoTip text="Shrinks long text so it fits the width in the chosen number of lines. Short text grows up to the max size." />
+				</span>
+				<Switch id="{id}-fit" bind:checked={value.fit} size="sm" />
+			</label>
+			{#if value.fit}
+				<div class="flex items-center justify-between" transition:slide={{ duration: 150 }}>
+					<span class="text-sm">Lines</span>
+					<Stepper bind:value={value.lines} min={1} max={6} label="{title} lines to fit" />
+				</div>
+			{/if}
 			<button
 				type="button"
 				class="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
@@ -62,10 +76,12 @@
 					<SliderField label="Top padding" bind:value={value.padTop} max={Math.max(60, maxSize)} />
 					<SliderField label="Bottom padding" bind:value={value.padBottom} max={Math.max(60, maxSize)} />
 					<SliderField label="Side padding" bind:value={value.padSide} max={Math.max(60, maxSize)} />
-					<div class="flex items-center justify-between">
-						<span class="text-sm">Max lines</span>
-						<Stepper bind:value={value.lines} min={1} max={6} label="{title} max lines" />
-					</div>
+					{#if !value.fit}
+						<div class="flex items-center justify-between">
+							<span class="text-sm">Max lines</span>
+							<Stepper bind:value={value.lines} min={1} max={6} label="{title} max lines" />
+						</div>
+					{/if}
 					<label class="flex cursor-pointer items-center justify-between" for="{id}-shadow">
 						<span class="text-sm">Shadow</span>
 						<Switch id="{id}-shadow" bind:checked={value.shadow.on} size="sm" />

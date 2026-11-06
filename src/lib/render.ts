@@ -10,6 +10,7 @@ import {
 	drawCaptions,
 	ensureCaptionFonts,
 	isEmpty,
+	plainText,
 	type CaptionStyle,
 	type Captioned,
 	type RichText
@@ -437,40 +438,43 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 	const push = (l: PsdLayer | null) => l && children.push(l);
 
 	if (opts.background.kind !== 'none') push(layer('Background', full, (ctx) => drawBackground(ctx, W, H, opts.background)));
-	if (opts.style.shadow.on && opts.style.shadow.strength > 0) push(layer('Shadows', full, (ctx) => drawShadows(ctx, items, opts.style, 1)));
-
-	if (opts.style.fill.on && opts.style.fill.opacity > 0) push(layer('Cell backgrounds', full, (ctx) => drawFills(ctx, items, opts.style, opts.cellBackground)));
-
-	const imageLayers: PsdLayer[] = [];
+	// One group per cell, in grid order, holding its layers in the chosen stacking order.
+	const st = opts.style;
+	const c = st.captions;
+	const order = layerOrder(st);
+	const digits = String(items.length).length;
+	const groups: PsdLayer[] = [];
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i];
-		if (!it) continue;
-		const bmp = await decode(images[i].file);
-		const l = layer(`${i + 1} ${images[i].name}`, it.clip, (ctx) => drawImage(ctx, it, bmp, borderInset(opts.style, 1)));
+		const img = images[i];
+		if (!it || !img) continue;
+		const cell = it.cell;
+		const m = st.shadow.on ? st.shadow.distance + st.shadow.softness * 2 : 0;
+		const around = { x: cell.x - m, y: cell.y - m, w: cell.w + 2 * m, h: cell.h + 2 * m };
+		const textBox = { x: cell.x - 64, y: cell.y - layout.bandAbove - 64, w: cell.w + 128, h: cell.h + layout.bandAbove + layout.bandBelow + 128 };
+		const group: PsdLayer[] = [];
+		const add = (l: PsdLayer | null) => l && group.push(l);
+		if (st.shadow.on && st.shadow.strength > 0) add(layer('Shadow', around, (ctx) => drawShadows(ctx, [it], st, 1)));
+		if (st.fill.on && st.fill.opacity > 0) add(layer('Cell background', cell, (ctx) => drawFills(ctx, [it], st, opts.cellBackground)));
+		const bmp = await decode(img.file);
+		for (const l of order) {
+			if (l === 'image') add(layer('Image', it.clip, (ctx) => drawImage(ctx, it, bmp, borderInset(st, 1))));
+			else if (!c.on) continue;
+			else if (l === 'fade') {
+				if (c.fade.on) add(layer('Caption fade', cell, (ctx) => drawFades(ctx, [it], [img], st)));
+			} else {
+				if (c.title.on && !isEmpty(img.title)) add(layer('Title', textBox, (ctx) => drawCaptions(ctx, [cell], [{ title: img.title }], c, 1)));
+				if (c.desc.on && !isEmpty(img.desc)) add(layer('Description', textBox, (ctx) => drawCaptions(ctx, [cell], [{ desc: img.desc }], c, 1)));
+			}
+		}
 		bmp.close();
-		if (l) imageLayers.push(l);
+		if (st.border.on && st.border.width > 0) add(layer('Border', around, (ctx) => drawBorders(ctx, [it], st)));
+		const title = plainText(img.title).trim() || img.name.replace(/\.[^.]+$/, '');
+		groups.push({ name: `${String(i + 1).padStart(Math.max(2, digits), '0')} ${title}`.slice(0, 250), children: group, opened: false });
 	}
-	const stack: Record<Layer, PsdLayer | null> = { image: { name: 'Images', children: imageLayers, opened: true }, fade: null, text: null };
-
-	if (opts.style.captions.on && opts.style.captions.fade.on)
-		stack.fade = layer('Caption fades', full, (ctx) => drawFades(ctx, items, layout.cells.map((_, i) => images[i] ?? null), opts.style));
-
-	const c = opts.style.captions;
-	if (c.on) {
-		const captionLayers: PsdLayer[] = [];
-		layout.cells.forEach((cell, i) => {
-			const img = images[i];
-			if (!img || (isEmpty(img.title) && isEmpty(img.desc))) return;
-			const pad = 64;
-			const box = { x: cell.x - pad, y: cell.y - layout.bandAbove - pad, w: cell.w + 2 * pad, h: cell.h + layout.bandAbove + layout.bandBelow + 2 * pad };
-			const l = layer(`Caption ${i + 1}`, box, (ctx) => drawCaptions(ctx, [cell], [img], c, 1));
-			if (l) captionLayers.push(l);
-		});
-		if (captionLayers.length) stack.text = { name: 'Captions', children: captionLayers, opened: true };
-	}
-	for (const l of layerOrder(opts.style)) push(stack[l]);
-	if (opts.style.border.on && opts.style.border.width > 0) push(layer('Borders', full, (ctx) => drawBorders(ctx, items, opts.style)));
-	if (opts.style.lines.on && opts.style.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, opts.style.lines)));
+	// Layers are listed bottom first; reversing puts cell 01 at the top of Photoshop's panel.
+	children.push(...groups.reverse());
+	if (st.lines.on && st.lines.width > 0) push(layer('Divider lines', full, (ctx) => drawLines(ctx, layout, st.lines)));
 
 	// The flattened image, shown by apps that don't read layers.
 	const composite = await renderFull(layout, images, opts);

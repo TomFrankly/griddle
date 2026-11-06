@@ -1242,7 +1242,8 @@
 	<div class="flex min-h-dvh flex-col md:h-dvh">
 		<header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
 			<div class="flex items-center gap-2">
-				<span class="font-logo text-[22px] leading-none italic">Griddle</span>
+				<!-- The script font keeps room for descenders this word lacks; the nudge centers the letters. -->
+				<span class="font-logo translate-y-[0.11em] text-[22px] leading-none italic">Griddle</span>
 			</div>
 			<div class="ml-auto flex items-center gap-1.5">
 				<LooksMenu current={currentLook} onapply={useLook} />
