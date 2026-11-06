@@ -28,6 +28,7 @@
 		index,
 		radius = 0,
 		free = false,
+		onselect,
 		onfiles,
 		cols = 1,
 		rows = 1,
@@ -45,6 +46,8 @@
 		radius?: number;
 		/** The cell has its own background, so the image may slide off its edges. */
 		free?: boolean;
+		/** A plain click on the cell, not a drag. */
+		onselect?: () => void;
 		onfiles?: (files: FileList) => void;
 		cols?: number;
 		rows?: number;
@@ -136,7 +139,17 @@
 	const controlInset = $derived(Math.max(6, Math.round((Math.min(radius, Math.min(rect.w, rect.h) / 2) - 14) * (1 - Math.SQRT1_2))));
 	const clamp = (n: number) => Math.min(1, Math.max(-1, n));
 
+	let pressAt: { x: number; y: number } | null = null;
+	function onClick(e: MouseEvent) {
+		const at = pressAt;
+		pressAt = null;
+		if ((e.target as Element).closest('[data-cell-control]')) return;
+		if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) > 4) return;
+		onselect?.();
+	}
+
 	function onPointerDown(e: PointerEvent) {
+		if (e.button === 0) pressAt = { x: e.clientX, y: e.clientY };
 		if (e.button !== 0 || !movable) return;
 		// The zoom slider and reset button handle their own pointer events.
 		if ((e.target as Element).closest('[data-cell-control]')) return;
@@ -221,6 +234,7 @@
 	ondrop={onDrop}
 	oncontextmenu={onContextMenu}
 	ondblclick={recenter}
+	onclick={onClick}
 >
 	{#if lifted}
 		<div class="bg-background/60 pointer-events-none absolute inset-0" style:border-radius="{radius}px"></div>

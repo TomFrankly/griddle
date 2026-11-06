@@ -336,6 +336,25 @@
 		target.addEventListener('pointerup', up);
 		target.addEventListener('pointercancel', up);
 	}
+	let paneList = $state<HTMLDivElement>();
+	/** Scrolls the side panel to an image's row, about 30% down, and flashes it. */
+	function revealInPane(id: string) {
+		const pane = paneList;
+		if (dockSide !== 'right' || !pane) return;
+		const row = pane.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`);
+		if (!row) return;
+		const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+		const top = pane.scrollTop + row.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+		pane.scrollTo({ top: Math.max(0, top - pane.clientHeight * 0.3), behavior: still ? 'auto' : 'smooth' });
+		const tint = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || 'gray';
+		row.getAnimations().forEach((a) => a.id === 'flash' && a.cancel());
+		row.animate([{ backgroundColor: `color-mix(in oklab, ${tint} 22%, transparent)` }, { backgroundColor: 'transparent' }], {
+			id: 'flash',
+			duration: 1400,
+			easing: 'ease-out'
+		});
+	}
+
 	/** Fits the grid in the stage again and centers it. */
 	async function recenter() {
 		nudge = { x: 0, y: 0 };
@@ -1146,6 +1165,7 @@
 				class="group relative shrink-0 {axis === 'x' ? 'size-16 cursor-grab border active:cursor-grabbing' : 'flex gap-3 border-b p-3'} transition-opacity"
 				class:opacity-35={i >= layout.used && dragId !== img.id}
 				class:opacity-40={dragId === img.id}
+				data-row={img.id}
 				draggable={axis === 'x' ? 'true' : undefined}
 				title={axis === 'x' ? img.name : undefined}
 				ondragstart={(e) => {
@@ -1599,6 +1619,7 @@
 										{rect}
 										area={displayAreas[i]}
 										free={style.fill.on}
+										onselect={() => revealInPane(images[i].id)}
 										image={images[i]}
 										{fit}
 										index={i}
@@ -1721,7 +1742,7 @@
 							<Button size="sm" variant="outline" onclick={() => (style.captions.on = true)}>Turn on</Button>
 						</div>
 					{/if}
-					<div class="min-h-0 flex-1 overflow-y-auto">{@render imageList('y')}</div>
+					<div bind:this={paneList} class="min-h-0 flex-1 overflow-y-auto">{@render imageList('y')}</div>
 				</aside>
 			{/if}
 		</div>
