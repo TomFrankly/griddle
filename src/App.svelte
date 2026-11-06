@@ -381,14 +381,14 @@
 
 	<div class="flex min-h-dvh flex-col md:h-dvh">
 		<header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-			<div class="flex items-center gap-2 font-medium tracking-tight">
+			<div class="flex items-center gap-2">
 				<svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
 					<rect x="1" y="1" width="6" height="6" fill="currentColor" />
 					<rect x="9" y="1" width="6" height="6" fill="currentColor" />
 					<rect x="1" y="9" width="6" height="6" fill="currentColor" />
 					<rect x="9" y="9" width="6" height="6" fill="currentColor" opacity=".35" />
 				</svg>
-				Griddle
+				<span class="font-logo text-[22px] leading-none italic">Griddle</span>
 			</div>
 			<div class="ml-auto flex items-center gap-1.5">
 				<DropdownMenu.Root>
