@@ -129,6 +129,8 @@
 	const zoomMin = $derived(Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
 	const movable = $derived(Math.abs(place.slackX) > 0.5 || Math.abs(place.slackY) > 0.5);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
+	// Hover controls are 28 px round; this keeps them inside the cell's rounded corners.
+	const controlInset = $derived(Math.max(6, Math.round((Math.min(radius, Math.min(rect.w, rect.h) / 2) - 14) * (1 - Math.SQRT1_2))));
 	const clamp = (n: number) => Math.min(1, Math.max(-1, n));
 
 	function onPointerDown(e: PointerEvent) {
@@ -200,6 +202,7 @@
 	style:top="{rect.y}px"
 	style:width="{rect.w}px"
 	style:height="{rect.h}px"
+	style:--ci="{controlInset}px"
 	role="application"
 	aria-roledescription="image crop"
 	tabindex="0"
@@ -233,13 +236,6 @@
 		style:border-radius="{radius}px"
 		class:opacity-100={dragging || allOpen}
 	></div>
-	{#if adjusted && !dragging}
-		<div
-			class="pointer-events-none absolute top-1.5 left-1.5 size-1.5 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)] transition-opacity group-hover/cell:opacity-0"
-			title="Moved or zoomed"
-			data-testid="cell-adjusted"
-		></div>
-	{/if}
 	<input
 		bind:this={fileInput}
 		type="file"
@@ -300,7 +296,7 @@
 	{#if compact && rect.w >= 30 && rect.h >= 30}
 		<button
 			type="button"
-			class="{pill} absolute top-1 left-1 size-7 cursor-grab opacity-0 transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 active:cursor-grabbing"
+			class="{pill} absolute top-[var(--ci)] left-[var(--ci)] size-7 cursor-grab opacity-0 transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 active:cursor-grabbing"
 			class:opacity-100={menuOpen}
 			aria-label="Options for image {index + 1}"
 			title="Drag to move, click for options"
@@ -317,7 +313,7 @@
 		</button>
 	{:else if !compact}
 		<div
-			class="absolute top-1.5 left-1.5 flex gap-1 opacity-0 transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
+			class="absolute top-[var(--ci)] left-[var(--ci)] flex gap-1 opacity-0 transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
 			class:opacity-100={menuOpen}
 			data-cell-control
 			role="presentation"
@@ -394,7 +390,7 @@
 		</div>
 		<button
 			type="button"
-			class="bg-background/70 text-foreground hover:bg-background/90 absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 disabled:hidden"
+			class="bg-background/70 text-foreground hover:bg-background/90 absolute top-[var(--ci)] right-[var(--ci)] flex size-7 items-center justify-center rounded-full opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100 disabled:hidden"
 			aria-label="Reset image {index + 1}"
 			title="Reset"
 			disabled={!adjusted}
@@ -405,7 +401,7 @@
 			<RotateCcwIcon class="size-3.5" />
 		</button>
 		<div
-			class="bg-background/70 absolute inset-x-2 bottom-2 flex h-7 items-center rounded-full px-3 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
+			class="bg-background/70 absolute inset-x-[var(--ci)] bottom-[var(--ci)] flex h-7 items-center rounded-full px-3 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-focus-within/cell:opacity-100 group-hover/cell:opacity-100"
 			class:opacity-100={menuOpen}
 			data-cell-control
 			role="presentation"

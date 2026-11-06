@@ -322,7 +322,9 @@
 			const v = axis(ev.clientY - start.y, start.top, start.ny, el.scrollHeight - el.clientHeight, box0.top, box0.height, view.top, view.height);
 			el.scrollLeft = h.scroll;
 			el.scrollTop = v.scroll;
-			nudge = { x: h.n, y: v.n };
+			// Whole device pixels keep the canvas edges crisp instead of blending with what's behind.
+			const d = window.devicePixelRatio || 1;
+			nudge = { x: Math.round(h.n * d) / d, y: Math.round(v.n * d) / d };
 		};
 		const up = () => {
 			panning = false;
@@ -1581,10 +1583,10 @@
 							style:translate="{nudge.x}px {nudge.y}px"
 							data-testid="preview-box"
 						>
-							<div class="checker absolute inset-0"></div>
 							<canvas
 								bind:this={canvas}
 								class="absolute"
+								class:checker={background.kind === 'none'}
 								style:left="{viewRect.x}px"
 								style:top="{viewRect.y}px"
 								style:width="{viewRect.w}px"
