@@ -73,8 +73,13 @@
 		type CellStyle,
 		type ExportFormat,
 		type FitMode,
-		type GridImage
+		type GridImage,
+		emptySlot,
+		hasImage
 	} from '$lib/render';
+	import { fillSlots } from '$lib/slots';
+	import SquarePlusIcon from '@lucide/svelte/icons/square-plus';
+	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import { PAINT_PRESETS } from '$lib/paint/presets';
 
 	const ASPECTS = [
@@ -139,6 +144,13 @@
 	let busy = $state(false);
 	let dragDepth = $state(0);
 	let fileInput: HTMLInputElement;
+	let slotInput: HTMLInputElement;
+	let slotTarget: number | null = null;
+	/** Opens the file picker to fill cell `i`. */
+	function pickFor(i: number) {
+		slotTarget = i;
+		slotInput.click();
+	}
 	let canvas = $state<HTMLCanvasElement>();
 	let stageW = $state(0);
 	let stageH = $state(0);
@@ -204,6 +216,8 @@
 		})
 	);
 	const unused = $derived(Math.max(0, images.length - layout.used));
+	const filled = $derived(images.filter(hasImage).length);
+	const emptyCount = $derived(images.length - filled);
 
 	/** The steppers show the automatic grid; changing one switches to manual. */
 	const colsBinding = {
@@ -244,7 +258,7 @@
 	}
 
 	function useFileNames() {
-		for (const img of images) img.title = fromPlain(img.name.replace(/\.[^.]+$/, ''));
+		for (const img of images) if (img.file) img.title = fromPlain(img.name.replace(/\.[^.]+$/, ''));
 	}
 
 	const preview = $derived.by(() => {
@@ -459,7 +473,7 @@
 	// Undo and redo. Each entry is a snapshot of the composition; images are referenced by id and
 	// kept decoded in `pool` until no snapshot uses them.
 	type Snapshot = {
-		images: { id: string; adjust: GridImage['adjust']; span: GridImage['span']; title: GridImage['title']; desc: GridImage['desc'] }[];
+		images: { id: string; adjust: GridImage['adjust']; span: GridImage['span']; title: GridImage['title']; desc: GridImage['desc']; empty?: true }[];
 		autoLayout: boolean;
 		quality: number;
 		cols: number;
@@ -490,7 +504,8 @@
 				adjust: { zoom: i.adjust.zoom, ox: i.adjust.ox, oy: i.adjust.oy },
 				span: { w: i.span.w, h: i.span.h },
 				title: $state.snapshot(i.title),
-				desc: $state.snapshot(i.desc)
+				desc: $state.snapshot(i.desc),
+				...(i.file ? {} : { empty: true as const })
 			})),
 			autoLayout,
 			quality,
@@ -536,7 +551,7 @@
 			? []
 			: snap.images.flatMap((i) => {
 					const img = pool.get(i.id);
-					return img ? [{ id: i.id, file: img.file }] : [];
+					return img?.file ? [{ id: i.id, file: img.file }] : [];
 				});
 		syncFiles(files);
 		saveBackground(bgImage?.file ?? null, 'canvas');
@@ -571,7 +586,7 @@
 				}
 			}
 			loading -= files.size;
-			if (!snap.images.some((i) => pool.has(i.id))) return false;
+			if (!snap.images.some((i) => pool.has(i.id) || i.empty)) return false;
 			restore(snap);
 			return true;
 		}
@@ -609,8 +624,9 @@
 	});
 
 	function restore(snap: Snapshot) {
-		images = snap.images.flatMap(({ id, adjust, span, title, desc }) => {
-			const img = pool.get(id);
+		images = snap.images.flatMap(({ id, adjust, span, title, desc, empty }) => {
+			let img = pool.get(id);
+			if (!img && empty) pool.set(id, (img = emptySlot(id)));
 			return img ? [{ ...img, adjust: { ...adjust }, span: { ...span }, title: structuredClone(title), desc: structuredClone(desc) }] : [];
 		});
 		autoLayout = snap.autoLayout;
@@ -697,8 +713,8 @@
 			showingExamples = false;
 		}
 		const ok = await loadAll(files);
-		if (!examples) ok.forEach((img) => storeFile(img.id, img.file));
-		images = [...images, ...ok];
+		if (!examples) ok.forEach((img) => img.file && storeFile(img.id, img.file));
+		images = fillSlots(images, ok);
 		if (examples) showingExamples = ok.length > 0;
 	}
 
@@ -718,21 +734,16 @@
 		return ok;
 	}
 
-	/** Puts dropped images into the grid starting at cell `index`, replacing what is there. */
+	/** Puts dropped images into cell `index`, replacing what is there; more go into later empty slots. */
 	async function replaceAt(index: number, list: FileList | File[] | null | undefined) {
 		dragDepth = 0;
 		const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
 		if (!files.length) return;
 		const ok = await loadAll(files);
 		if (!ok.length) return;
-		ok.forEach((img) => storeFile(img.id, img.file));
-		const next = [...images];
-		ok.forEach((img, j) => {
-			// The new image takes over the cell's size in the layout.
-			if (index + j < next.length) next[index + j] = { ...img, span: { ...next[index + j].span } };
-			else next.push(img);
-		});
-		images = next;
+		ok.forEach((img) => img.file && storeFile(img.id, img.file));
+		// The first image takes over this cell (and its size); the rest fill empty slots after it.
+		images = fillSlots(images, ok, index);
 		showingExamples = false;
 	}
 
@@ -777,8 +788,30 @@
 	}
 
 	function release(img: GridImage) {
-		img.thumb.close();
-		URL.revokeObjectURL(img.thumbUrl);
+		img.thumb?.close();
+		if (img.thumbUrl) URL.revokeObjectURL(img.thumbUrl);
+	}
+	/** Adds empty slots at a position (the end by default), to fill with images later. */
+	function addSlots(count = 1, at = images.length) {
+		const slots = Array.from({ length: count }, () => emptySlot());
+		slots.forEach((s) => pool.set(s.id, s));
+		const next = [...images];
+		next.splice(Math.min(at, next.length), 0, ...slots);
+		images = next;
+		showingExamples = false;
+	}
+	/** A grid of empty slots to plan the layout before adding any images. */
+	function startEmpty() {
+		if (showingExamples) clearAll();
+		addSlots(Math.max(1, cols * rows));
+	}
+	/** Takes the image out of a cell but keeps the cell, with its size and captions. */
+	function clearImage(i: number) {
+		const img = images[i];
+		if (!img?.file) return;
+		const slot = { ...emptySlot(), span: { ...img.span }, title: img.title, desc: img.desc };
+		pool.set(slot.id, slot);
+		images = images.map((x, j) => (j === i ? slot : x));
 	}
 	// Removed images stay decoded until history no longer refers to them (see prune).
 	function remove(id: string) {
@@ -810,7 +843,8 @@
 		images = next;
 	}
 	function sortByName() {
-		images = [...images].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+		// Empty slots go last.
+		images = [...images].sort((a, b) => +!a.file - +!b.file || a.name.localeCompare(b.name, undefined, { numeric: true }));
 	}
 	function resetAll() {
 		for (const img of images) img.adjust = { zoom: 1, ox: 0, oy: 0 };
@@ -1041,7 +1075,7 @@
 		const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
 		if (!files.length) return;
 		const ok = await loadAll(files);
-		ok.forEach((img) => storeFile(img.id, img.file));
+		ok.forEach((img) => img.file && storeFile(img.id, img.file));
 		const next = [...images];
 		next.splice(Math.min(at, next.length), 0, ...ok);
 		images = next;
@@ -1187,9 +1221,10 @@
 		<span class="text-muted-foreground text-xs tabular-nums">
 			{#if showingExamples}Example images ·
 				<button type="button" class="text-foreground underline-offset-2 hover:underline" onclick={() => fileInput.click()}>Add your own</button>
-			{:else}{images.length} image{images.length === 1 ? '' : 's'}{/if}{#if unused && !showingExamples}<span> · {unused} not used</span>{/if}
+			{:else}{filled} image{filled === 1 ? '' : 's'}{#if emptyCount}<span>&nbsp;· {emptyCount} empty</span>{/if}{/if}{#if unused && !showingExamples}<span> · {unused} not used</span>{/if}
 		</span>
 		<div class="ml-auto flex items-center">
+			{@render iconAction('Add an empty slot', SquarePlusIcon, () => addSlots())}
 			{@render iconAction('Reset all crops', RotateCcwIcon, resetAll)}
 			{@render iconAction('Sort by name', ArrowDownAZIcon, sortByName)}
 			{@render iconAction('Shuffle', ShuffleIcon, shuffle)}
@@ -1240,12 +1275,25 @@
 					draggable={axis === 'y' ? 'true' : undefined}
 					title={axis === 'y' ? `${img.name} · drag to reorder` : undefined}
 				>
-					<img src={img.thumbUrl} alt={img.name} class="size-full object-cover" draggable="false" />
+					{#if img.file}
+						<img src={img.thumbUrl} alt={img.name} class="size-full object-cover" draggable="false" />
+					{:else}
+						<button
+							type="button"
+							class="bg-muted text-muted-foreground hover:text-foreground flex size-full items-center justify-center"
+							aria-label="Add an image to slot {i + 1}"
+							title="Empty slot · click to add an image"
+							data-testid="thumb-empty"
+							onclick={() => pickFor(i)}
+						>
+							<ImagePlusIcon class="size-4" />
+						</button>
+					{/if}
 					<span class="bg-background/90 absolute bottom-0 left-0 px-1 text-[10px] tabular-nums">{i + 1}</span>
 					<button
 						type="button"
 						class="bg-background/90 absolute top-0 right-0 hidden size-5 items-center justify-center group-hover:flex focus-visible:flex"
-						aria-label="Remove {img.name}"
+						aria-label={img.file ? `Remove ${img.name}` : `Remove empty slot ${i + 1}`}
 						onclick={() => remove(img.id)}
 					>
 						<XIcon class="size-3" />
@@ -1289,6 +1337,19 @@
 		data-testid="file-input"
 		onchange={(e) => {
 			addFiles(e.currentTarget.files);
+			e.currentTarget.value = '';
+		}}
+	/>
+	<input
+		bind:this={slotInput}
+		type="file"
+		accept="image/*"
+		multiple
+		class="hidden"
+		data-testid="slot-input"
+		onchange={(e) => {
+			if (slotTarget !== null) replaceAt(slotTarget, e.currentTarget.files);
+			slotTarget = null;
 			e.currentTarget.value = '';
 		}}
 	/>
@@ -1358,7 +1419,7 @@
 								<DropdownMenu.CheckboxItem bind:checked={cellPick.shadow} closeOnSelect={false}>Shadow</DropdownMenu.CheckboxItem>
 								<DropdownMenu.CheckboxItem bind:checked={cellPick.captions} closeOnSelect={false}>Captions</DropdownMenu.CheckboxItem>
 								<DropdownMenu.Separator />
-								<DropdownMenu.Item onclick={downloadCells} data-testid="download-cells">Download {images.length} PNG{images.length === 1 ? '' : 's'}</DropdownMenu.Item>
+								<DropdownMenu.Item onclick={downloadCells} data-testid="download-cells">Download {filled} PNG{filled === 1 ? '' : 's'}</DropdownMenu.Item>
 							</DropdownMenu.SubContent>
 						</DropdownMenu.Sub>
 						<DropdownMenu.Separator />
@@ -1699,6 +1760,8 @@
 										onreorder={images.length > 1 ? (e) => startLift(e, i) : undefined}
 										lifted={lift?.from === i}
 										onremove={() => remove(images[i].id)}
+										onclear={() => clearImage(i)}
+										onaddslot={() => addSlots(1, i + 1)}
 										radius={style.corners.on ? (style.corners.radius / 100) * (Math.min(rect.w, rect.h) / 2) : 0}
 									/>
 								{/if}
@@ -1765,13 +1828,21 @@
 							</button>
 						</div>
 						{#if lift && images[lift.from]}
-							<img
-								src={images[lift.from].thumbUrl}
-								alt=""
-								class="pointer-events-none fixed z-50 size-20 -translate-x-1/2 -translate-y-1/2 object-cover opacity-80 shadow-lg"
-								style:left="{lift.x}px"
-								style:top="{lift.y}px"
-							/>
+							{#if images[lift.from].file}
+								<img
+									src={images[lift.from].thumbUrl}
+									alt=""
+									class="pointer-events-none fixed z-50 size-20 -translate-x-1/2 -translate-y-1/2 object-cover opacity-80 shadow-lg"
+									style:left="{lift.x}px"
+									style:top="{lift.y}px"
+								/>
+							{:else}
+								<div
+									class="bg-muted border-border pointer-events-none fixed z-50 size-20 -translate-x-1/2 -translate-y-1/2 border opacity-80 shadow-lg"
+									style:left="{lift.x}px"
+									style:top="{lift.y}px"
+								></div>
+							{/if}
 						{/if}
 					{:else}
 						<div class="flex flex-col items-center gap-3">
@@ -1785,6 +1856,16 @@
 								<span class="text-muted-foreground text-xs">or click to choose</span>
 							</button>
 							<div class="flex gap-1">
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										{#snippet child({ props })}
+											<Button {...props} variant="ghost" size="sm" onclick={startEmpty} data-testid="start-empty">
+												<LayoutGridIcon />Start with empty slots
+											</Button>
+										{/snippet}
+									</Tooltip.Trigger>
+									<Tooltip.Content>Lay out a {cols} × {rows} grid first, then drop images into it</Tooltip.Content>
+								</Tooltip.Root>
 								<Button variant="ghost" size="sm" onclick={loadSamples} disabled={loading > 0} data-testid="load-samples">Load samples</Button>
 								{#if DEV}
 									<Button variant="ghost" size="sm" onclick={loadPokemon} disabled={loading > 0} data-testid="load-pokemon">Load 25 Pokémon</Button>
@@ -1802,7 +1883,7 @@
 							class="border-primary pointer-events-none absolute inset-2 flex justify-center border-2 {images.length ? 'items-start' : 'bg-background/80 items-center'}"
 						>
 							<span class="bg-primary text-primary-foreground px-2.5 py-1 text-xs font-medium">
-								{images.length ? 'Drop on an image to replace it, or anywhere else to add' : 'Drop to add'}
+								{images.length ? 'Drop on a cell to fill or replace it, or anywhere else to add' : 'Drop to add'}
 							</span>
 						</div>
 					{/if}

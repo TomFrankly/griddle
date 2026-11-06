@@ -26,16 +26,18 @@ export type Background =
 	| { kind: 'paint'; id: string; paint: BackdropPaint }
 	| { kind: 'image'; image: ImageBitmap };
 
-export type Drawable = Captioned & { source: CanvasImageSource; width: number; height: number; adjust: Adjust };
+/** `source` is null for an empty slot, which keeps its place, cell background and captions. */
+export type Drawable = Captioned & { source: CanvasImageSource | null; width: number; height: number; adjust: Adjust };
 
+/** One cell of the grid. An empty slot has no file, no thumbnail and a size of 0 × 0. */
 export type GridImage = {
 	id: string;
 	name: string;
-	file: File;
+	file: File | null;
 	width: number;
 	height: number;
 	/** Downscaled copy used for the on-screen preview. */
-	thumb: ImageBitmap;
+	thumb: ImageBitmap | null;
 	thumbUrl: string;
 	adjust: Adjust;
 	/** Grid cells this image covers across and down. */
@@ -45,6 +47,27 @@ export type GridImage = {
 };
 
 type Ctx = CanvasRenderingContext2D;
+
+/** True when the cell holds an image rather than being an empty slot. */
+export const hasImage = (img: Pick<GridImage, 'file'> | null | undefined): img is GridImage & { file: File } => !!img?.file;
+
+let slotCounter = 0;
+/** A cell with no image yet: it takes part in the layout and can carry a span and captions. */
+export function emptySlot(id = `slot-${Date.now()}-${slotCounter++}`): GridImage {
+	return {
+		id,
+		name: 'Empty slot',
+		file: null,
+		width: 0,
+		height: 0,
+		thumb: null,
+		thumbUrl: '',
+		adjust: { ...DEFAULT_ADJUST },
+		span: { w: 1, h: 1 },
+		title: [],
+		desc: []
+	};
+}
 
 const paintCache = new Map<string, HTMLCanvasElement>();
 
@@ -132,6 +155,9 @@ function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: Cell
 		const img = sizes[i];
 		if (!img) return null;
 		const inner = imageArea(cell, style);
+		// An empty slot shows only its cell background, so without one there is nothing to draw.
+		if (img.width <= 0 || img.height <= 0)
+			return boxed ? { cell, place: inner, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) } : null;
 		const place = placeImage(img.width, img.height, inner, fit, img.adjust, style.fill.on);
 		if (boxed) return { cell, place, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) };
 		const x = Math.max(inner.x, place.x);
@@ -311,7 +337,11 @@ export function drawGrid(
 	drawFills(ctx, items, opts.style, opts.cellBackground);
 	const inset = borderInset(opts.style, opts.scale);
 	for (const layer of layerOrder(opts.style)) {
-		if (layer === 'image') items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
+		if (layer === 'image')
+			items.forEach((it, i) => {
+				const src = imgs[i]?.source;
+				if (it && src) drawImage(ctx, it, src, inset);
+			});
 		else if (layer === 'fade') drawFades(ctx, items, imgs, opts.style);
 		else drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
 	}
@@ -319,6 +349,9 @@ export function drawGrid(
 	drawLines(ctx, layout, opts.style.lines);
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
+
+const hasCaptionText = (c: CaptionStyle, img: Captioned) =>
+	c.on && ((c.title.on && !isEmpty(img.title)) || (c.desc.on && !isEmpty(img.desc)));
 
 const THUMB_MAX = 1200;
 let counter = 0;
@@ -384,8 +417,9 @@ export async function renderFull(
 		else
 			for (let i = 0; i < items.length; i++) {
 				const it = items[i];
-				if (!it) continue;
-				const bmp = await decode(images[i].file);
+				const file = images[i]?.file;
+				if (!it || !file) continue;
+				const bmp = await decode(file);
 				drawImage(ctx, it, bmp, borderInset(opts.style, 1));
 				bmp.close();
 			}
@@ -447,28 +481,29 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i];
 		const img = images[i];
-		if (!it || !img) continue;
-		const cell = it.cell;
+		if (!img || (!it && !hasCaptionText(c, img))) continue;
+		const cell = it?.cell ?? layout.cells[i];
 		const m = st.shadow.on ? st.shadow.distance + st.shadow.softness * 2 : 0;
 		const around = { x: cell.x - m, y: cell.y - m, w: cell.w + 2 * m, h: cell.h + 2 * m };
 		const textBox = { x: cell.x - 64, y: cell.y - layout.bandAbove - 64, w: cell.w + 128, h: cell.h + layout.bandAbove + layout.bandBelow + 128 };
 		const group: PsdLayer[] = [];
 		const add = (l: PsdLayer | null) => l && group.push(l);
-		if (st.shadow.on && st.shadow.strength > 0) add(layer('Shadow', around, (ctx) => drawShadows(ctx, [it], st, 1)));
-		if (st.fill.on && st.fill.opacity > 0) add(layer('Cell background', cell, (ctx) => drawFills(ctx, [it], st, opts.cellBackground)));
-		const bmp = await decode(img.file);
+		if (it && st.shadow.on && st.shadow.strength > 0) add(layer('Shadow', around, (ctx) => drawShadows(ctx, [it], st, 1)));
+		if (it && st.fill.on && st.fill.opacity > 0) add(layer('Cell background', cell, (ctx) => drawFills(ctx, [it], st, opts.cellBackground)));
+		const bmp = it && img.file ? await decode(img.file) : null;
 		for (const l of order) {
-			if (l === 'image') add(layer('Image', it.clip, (ctx) => drawImage(ctx, it, bmp, borderInset(st, 1))));
-			else if (!c.on) continue;
+			if (l === 'image') {
+				if (it && bmp) add(layer('Image', it.clip, (ctx) => drawImage(ctx, it, bmp, borderInset(st, 1))));
+			} else if (!c.on) continue;
 			else if (l === 'fade') {
-				if (c.fade.on) add(layer('Caption fade', cell, (ctx) => drawFades(ctx, [it], [img], st)));
+				if (it && c.fade.on) add(layer('Caption fade', cell, (ctx) => drawFades(ctx, [it], [img], st)));
 			} else {
 				if (c.title.on && !isEmpty(img.title)) add(layer('Title', textBox, (ctx) => drawCaptions(ctx, [cell], [{ title: img.title }], c, 1)));
 				if (c.desc.on && !isEmpty(img.desc)) add(layer('Description', textBox, (ctx) => drawCaptions(ctx, [cell], [{ desc: img.desc }], c, 1)));
 			}
 		}
-		bmp.close();
-		if (st.border.on && st.border.width > 0) add(layer('Border', around, (ctx) => drawBorders(ctx, [it], st)));
+		bmp?.close();
+		if (it && st.border.on && st.border.width > 0) add(layer('Border', around, (ctx) => drawBorders(ctx, [it], st)));
 		const title = plainText(img.title).trim() || img.name.replace(/\.[^.]+$/, '');
 		groups.push({ name: `${String(i + 1).padStart(Math.max(2, digits), '0')} ${title}`.slice(0, 250), children: group, opened: false });
 	}
@@ -509,7 +544,8 @@ export async function renderCells(
 	const out: { index: number; blob: Blob }[] = [];
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i];
-		if (!it) continue;
+		const file = images[i]?.file;
+		if (!it || !file) continue;
 		const box = caps
 			? { x: it.cell.x, y: it.cell.y - layout.bandAbove, w: it.cell.w, h: it.cell.h + layout.bandAbove + layout.bandBelow }
 			: it.visible;
@@ -523,7 +559,7 @@ export async function renderCells(
 		ctx.translate(-left, -top);
 		drawShadows(ctx, [it], style, 1);
 		drawFills(ctx, [it], style, opts.cellBackground);
-		const bmp = await decode(images[i].file);
+		const bmp = await decode(file);
 		for (const layer of layerOrder(style)) {
 			if (layer === 'image') drawImage(ctx, it, bmp, borderInset(style, 1));
 			else if (!caps) continue;
