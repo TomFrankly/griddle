@@ -166,14 +166,14 @@
 <div class="relative" bind:this={wrap}>
 	<div
 		bind:this={host}
-		class="rich border-input focus-within:border-ring focus-within:ring-ring/50 min-h-9 w-full border bg-transparent px-2.5 py-1.5 text-sm focus-within:ring-3"
+		class="rich border-input focus-within:border-ring focus-within:ring-ring/50 min-h-9 w-full rounded-md border bg-transparent px-2.5 py-1.5 text-sm focus-within:ring-3"
 	></div>
 	{#if empty && placeholder}
 		<span class="text-muted-foreground pointer-events-none absolute top-1.5 left-2.5 text-sm">{placeholder}</span>
 	{/if}
 	{#if bar}
 		<div
-			class="bg-popover text-popover-foreground absolute z-50 flex -translate-x-1/2 -translate-y-full items-center gap-0.5 border p-0.5 shadow-md"
+			class="bg-popover text-popover-foreground absolute z-50 flex -translate-x-1/2 -translate-y-full items-center gap-0.5 rounded-md border p-0.5 shadow-md"
 			style:left="{bar.x}px"
 			style:top="{bar.y - 6}px"
 			role="toolbar"
@@ -183,7 +183,7 @@
 			{#each [['bold', BoldIcon, 'Bold'], ['italic', ItalicIcon, 'Italic'], ['underline', UnderlineIcon, 'Underline'], ['strike', StrikethroughIcon, 'Strikethrough']] as const as [name, Icon, title] (name)}
 				<button
 					type="button"
-					class="hover:bg-accent flex size-7 items-center justify-center"
+					class="hover:bg-accent flex size-7 rounded-sm items-center justify-center"
 					class:bg-accent={active[name]}
 					aria-label={title}
 					aria-pressed={active[name]}

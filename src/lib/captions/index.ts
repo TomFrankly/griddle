@@ -16,7 +16,8 @@ export type TextStyle = {
 	/** Output pixels. */
 	size: number;
 	color: string;
-	position: 'above' | 'below';
+	/** Above or below the image, or inside the cell at its top or bottom. */
+	position: 'above' | 'below' | 'top' | 'bottom';
 	/** Space above and below this text, in output pixels. */
 	padTop: number;
 	padBottom: number;
@@ -52,13 +53,19 @@ export const fromPlain = (s: string): RichText => s.split('\n').map((line) => (l
 type Part = { key: 'title' | 'desc'; style: TextStyle };
 
 /** The title and description that are on, in the order they stack outward from the image. */
-function parts(c: CaptionStyle, where: 'above' | 'below'): Part[] {
+function parts(c: CaptionStyle, where: TextStyle['position']): Part[] {
 	if (!c.on) return [];
 	const list: Part[] = [];
 	if (c.title.on && c.title.position === where) list.push({ key: 'title', style: c.title });
 	if (c.desc.on && c.desc.position === where) list.push({ key: 'desc', style: c.desc });
 	// Above the image the title still reads first, so the description is the nearer one.
 	return where === 'above' ? list.reverse() : list;
+}
+
+/** Space taken inside each cell, at its top and bottom, by captions placed there. */
+export function captionInsets(c: CaptionStyle): { top: number; bottom: number } {
+	const sum = (p: Part[]) => p.reduce((t, x) => t + blockHeight(x.style), 0);
+	return { top: sum(parts(c, 'top')), bottom: sum(parts(c, 'bottom')) };
 }
 
 const blockHeight = (s: TextStyle) => s.padTop + s.padBottom + Math.max(1, s.lines) * s.size * LINE_HEIGHT;
@@ -257,6 +264,24 @@ export function drawCaptions(ctx: Ctx, cells: Rect[], texts: (Captioned | null)[
 			y += style.padTop;
 			if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { x: cell.x, y, w: cell.w, h }, c.align, scale);
 			y += h + style.padBottom;
+		}
+		// Inside the cell, text keeps a little distance from the cell's sides.
+		const inside = (style: TextStyle) => {
+			const side = Math.round(style.size * 0.5);
+			return { x: cell.x + side, w: Math.max(1, cell.w - side * 2) };
+		};
+		const bottom = parts(c, 'bottom');
+		for (const [list, start] of [
+			[parts(c, 'top'), cell.y],
+			[bottom, cell.y + cell.h - bottom.reduce((s, x) => s + blockHeight(x.style), 0)]
+		] as const) {
+			y = start;
+			for (const { key, style } of list) {
+				const h = style.lines * style.size * LINE_HEIGHT;
+				y += style.padTop;
+				if (!isEmpty(t[key])) drawBlock(ctx, t[key]!, style, { ...inside(style), y, h }, c.align, scale);
+				y += h + style.padBottom;
+			}
 		}
 	});
 }

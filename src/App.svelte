@@ -29,6 +29,9 @@
 	import ArrowDownAZIcon from '@lucide/svelte/icons/arrow-down-a-z';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import XIcon from '@lucide/svelte/icons/x';
+	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
+	import PanelBottomIcon from '@lucide/svelte/icons/panel-bottom';
+	import RichText from '$lib/components/rich-text.svelte';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Undo2Icon from '@lucide/svelte/icons/undo-2';
@@ -716,12 +719,6 @@
 	let dragId = $state<string | null>(null);
 	/** Where a dragged thumbnail would go: before the image at this index (length means last). */
 	let insertAt = $state<number | null>(null);
-	function onThumbOver(e: DragEvent, i: number) {
-		if (!dragId) return;
-		e.preventDefault();
-		const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		insertAt = e.clientX < box.left + box.width / 2 ? i : i + 1;
-	}
 	// Moving images by dragging them on the grid itself
 	let lift = $state<{ from: number; x: number; y: number; at: number | null } | null>(null);
 	let previewEl = $state<HTMLDivElement>();
@@ -776,6 +773,68 @@
 		window.addEventListener('pointercancel', cancel);
 	}
 
+	let dockSide = $state<'bottom' | 'right'>(readDock());
+	function readDock(): 'bottom' | 'right' {
+		try {
+			return localStorage.getItem('griddle:dock') === 'right' ? 'right' : 'bottom';
+		} catch {
+			return 'bottom';
+		}
+	}
+	function toggleDock() {
+		dockSide = dockSide === 'bottom' ? 'right' : 'bottom';
+		try {
+			localStorage.setItem('griddle:dock', dockSide);
+		} catch {
+			// Remembering the layout is a convenience.
+		}
+	}
+
+	/** The insertion line shows while reordering or while files are dragged over the list. */
+	const showInsert = $derived(insertAt !== null && (dragId !== null || dragDepth > 0));
+
+	/** Tracks where a dragged thumbnail or dropped files would go. `i` null means the list's end. */
+	function onListOver(e: DragEvent, i: number | null, axis: 'x' | 'y') {
+		if (!dragId && !hasFiles(e)) return;
+		e.preventDefault();
+		if (i === null) {
+			if (e.target === e.currentTarget) insertAt = images.length;
+			return;
+		}
+		e.stopPropagation();
+		const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const before = axis === 'x' ? e.clientX < box.left + box.width / 2 : e.clientY < box.top + box.height / 2;
+		insertAt = before ? i : i + 1;
+	}
+
+	function onListDrop(e: DragEvent) {
+		if (dragId) {
+			e.preventDefault();
+			e.stopPropagation();
+			onThumbDrop();
+			return;
+		}
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const at = insertAt ?? images.length;
+		insertAt = null;
+		dragDepth = 0;
+		insertFiles(at, e.dataTransfer?.files);
+	}
+
+	/** Adds images at a position in the list. Samples already shown are kept. */
+	async function insertFiles(at: number, list: FileList | File[] | null | undefined) {
+		const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
+		if (!files.length) return;
+		const ok = await loadAll(files);
+		ok.forEach((img) => storeFile(img.id, img.file));
+		const next = [...images];
+		next.splice(Math.min(at, next.length), 0, ...ok);
+		images = next;
+		showingExamples = false;
+	}
+
 	function onThumbDrop() {
 		const from = images.findIndex((i) => i.id === dragId);
 		const at = insertAt;
@@ -806,6 +865,7 @@
 		if (!hasFiles(e)) return;
 		e.preventDefault();
 		dragDepth = 0;
+		insertAt = null;
 		addFiles(e.dataTransfer?.files);
 	}
 	/** Pasting while the pointer is over a cell replaces that image; anywhere else adds. */
@@ -886,6 +946,89 @@
 
 <ModeWatcher />
 <Toaster position="bottom-center" />
+
+{#snippet dockHeader()}
+	<div class="flex h-9 items-center gap-1 border-b px-3">
+		<span class="text-muted-foreground text-xs tabular-nums">
+			{#if showingExamples}Example images ·
+				<button type="button" class="text-foreground underline-offset-2 hover:underline" onclick={() => fileInput.click()}>Add your own</button>
+			{:else}{images.length} image{images.length === 1 ? '' : 's'}{/if}{#if unused && !showingExamples}<span> · {unused} not used</span>{/if}
+		</span>
+		<div class="ml-auto flex items-center">
+			{@render iconAction('Reset all crops', RotateCcwIcon, resetAll)}
+			{@render iconAction('Sort by name', ArrowDownAZIcon, sortByName)}
+			{@render iconAction('Shuffle', ShuffleIcon, shuffle)}
+			{@render iconAction('Remove all', Trash2Icon, clearAll)}
+			{@render iconAction(dockSide === 'bottom' ? 'Edit captions in a side panel' : 'Move images to the bottom', dockSide === 'bottom' ? PanelRightIcon : PanelBottomIcon, toggleDock)}
+		</div>
+	</div>
+{/snippet}
+
+{#snippet insertLine(axis: 'x' | 'y', edge: 'start' | 'end')}
+	<span
+		class="bg-primary pointer-events-none absolute z-10 {axis === 'x'
+			? `-top-1 -bottom-1 w-0.5 ${edge === 'start' ? '-left-[6px]' : '-right-[6px]'}`
+			: `right-0 left-0 h-0.5 ${edge === 'start' ? '-top-px' : '-bottom-px'}`}"
+		data-testid="insert-line"
+	></span>
+{/snippet}
+
+{#snippet imageList(axis: 'x' | 'y')}
+	<ol
+		class={axis === 'x' ? 'flex gap-2 overflow-x-auto p-3' : 'flex flex-col'}
+		data-testid="thumbs"
+		ondragover={(e) => onListOver(e, null, axis)}
+		ondrop={onListDrop}
+	>
+		{#each images as img, i (img.id)}
+			<li
+				class="group relative shrink-0 {axis === 'x' ? 'size-16 cursor-grab border active:cursor-grabbing' : 'flex gap-3 border-b p-3'} transition-opacity"
+				class:opacity-35={i >= layout.used && dragId !== img.id}
+				class:opacity-40={dragId === img.id}
+				draggable={axis === 'x' ? 'true' : undefined}
+				title={axis === 'x' ? img.name : undefined}
+				ondragstart={(e) => {
+					if (axis === 'y' && !(e.target as HTMLElement).closest('[data-drag-handle]')) return;
+					dragId = img.id;
+					e.dataTransfer?.setData('text/plain', img.id);
+					if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+				}}
+				ondragover={(e) => onListOver(e, i, axis)}
+				ondragend={() => (dragId = insertAt = null)}
+			>
+				{#if showInsert && insertAt === i}{@render insertLine(axis, 'start')}{/if}
+				{#if showInsert && insertAt === i + 1 && i === images.length - 1}{@render insertLine(axis, 'end')}{/if}
+				<div
+					class="relative shrink-0 {axis === 'x' ? 'size-full' : 'size-20 cursor-grab border active:cursor-grabbing'}"
+					data-drag-handle
+					draggable={axis === 'y' ? 'true' : undefined}
+					title={axis === 'y' ? `${img.name} · drag to reorder` : undefined}
+				>
+					<img src={img.thumbUrl} alt={img.name} class="size-full object-cover" draggable="false" />
+					<span class="bg-background/90 absolute bottom-0 left-0 px-1 text-[10px] tabular-nums">{i + 1}</span>
+					<button
+						type="button"
+						class="bg-background/90 absolute top-0 right-0 hidden size-5 items-center justify-center group-hover:flex focus-visible:flex"
+						aria-label="Remove {img.name}"
+						onclick={() => remove(img.id)}
+					>
+						<XIcon class="size-3" />
+					</button>
+				</div>
+				{#if axis === 'y'}
+					<div class="min-w-0 flex-1 space-y-2">
+						{#if style.captions.title.on || !style.captions.on}
+							<RichText bind:value={img.title} label="Title for image {i + 1}" placeholder="Title" testid="pane-title" />
+						{/if}
+						{#if style.captions.desc.on || !style.captions.on}
+							<RichText bind:value={img.desc} label="Description for image {i + 1}" placeholder="Description" testid="pane-desc" />
+						{/if}
+					</div>
+				{/if}
+			</li>
+		{/each}
+	</ol>
+{/snippet}
 
 {#snippet iconAction(label: string, Icon: typeof CopyIcon, fn: () => void, disabled = false)}
 	<Tooltip.Root>
@@ -1309,65 +1452,25 @@
 					{/if}
 				</div>
 
-				{#if images.length}
+				{#if images.length && dockSide === 'bottom'}
 					<div class="shrink-0 border-t">
-						<div class="flex h-9 items-center gap-1 border-b px-3">
-							<span class="text-muted-foreground text-xs tabular-nums">
-								{#if showingExamples}Example images ·
-									<button type="button" class="text-foreground underline-offset-2 hover:underline" onclick={() => fileInput.click()}>Add your own</button>
-								{:else}{images.length} image{images.length === 1 ? '' : 's'}{/if}{#if unused && !showingExamples}<span> · {unused} not used</span>{/if}
-							</span>
-							<div class="ml-auto flex items-center">
-								{@render iconAction('Reset all crops', RotateCcwIcon, resetAll)}
-								{@render iconAction('Sort by name', ArrowDownAZIcon, sortByName)}
-								{@render iconAction('Shuffle', ShuffleIcon, shuffle)}
-								{@render iconAction('Remove all', Trash2Icon, clearAll)}
-							</div>
-						</div>
-						<ol class="flex gap-2 overflow-x-auto p-3" data-testid="thumbs">
-							{#each images as img, i (img.id)}
-								<li
-									class="group relative size-16 shrink-0 cursor-grab border transition-opacity active:cursor-grabbing"
-									class:opacity-35={i >= layout.used && dragId !== img.id}
-									class:opacity-40={dragId === img.id}
-									draggable="true"
-									title={img.name}
-									ondragstart={(e) => {
-										dragId = img.id;
-										e.dataTransfer?.setData('text/plain', img.id);
-										if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-									}}
-									ondragover={(e) => onThumbOver(e, i)}
-									ondrop={(e) => {
-										if (!dragId) return;
-										e.preventDefault();
-										e.stopPropagation();
-										onThumbDrop();
-									}}
-									ondragend={() => (dragId = insertAt = null)}
-								>
-									{#if dragId && insertAt === i}
-										<span class="bg-primary pointer-events-none absolute -top-1 -bottom-1 -left-[6px] z-10 w-0.5" data-testid="insert-line"></span>
-									{/if}
-									{#if dragId && insertAt === i + 1 && i === images.length - 1}
-										<span class="bg-primary pointer-events-none absolute -top-1 -right-[6px] -bottom-1 z-10 w-0.5" data-testid="insert-line"></span>
-									{/if}
-									<img src={img.thumbUrl} alt={img.name} class="size-full object-cover" draggable="false" />
-									<span class="bg-background/90 absolute bottom-0 left-0 px-1 text-[10px] tabular-nums">{i + 1}</span>
-									<button
-										type="button"
-										class="bg-background/90 absolute top-0 right-0 hidden size-5 items-center justify-center group-hover:flex focus-visible:flex"
-										aria-label="Remove {img.name}"
-										onclick={() => remove(img.id)}
-									>
-										<XIcon class="size-3" />
-									</button>
-								</li>
-							{/each}
-						</ol>
+						{@render dockHeader()}
+						{@render imageList('x')}
 					</div>
 				{/if}
 			</main>
+			{#if images.length && dockSide === 'right'}
+				<aside class="flex shrink-0 flex-col border-t md:min-h-0 md:w-96 md:border-t-0 md:border-l" data-testid="caption-pane">
+					{@render dockHeader()}
+					{#if !style.captions.on}
+						<div class="text-muted-foreground flex items-center justify-between gap-2 border-b px-3 py-2 text-xs">
+							Captions are off.
+							<Button size="sm" variant="outline" onclick={() => (style.captions.on = true)}>Turn on</Button>
+						</div>
+					{/if}
+					<div class="min-h-0 flex-1 overflow-y-auto">{@render imageList('y')}</div>
+				</aside>
+			{/if}
 		</div>
 	</div>
 </Tooltip.Provider>

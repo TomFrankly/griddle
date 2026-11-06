@@ -2,6 +2,7 @@ import { DEFAULT_ADJUST, placeImage, type Adjust, type Layout, type Rect } from 
 import { maxPaintSide, paintCanvas } from './paint/paint-gl';
 import type { BackdropPaint } from './paint/presets';
 import {
+	captionInsets,
 	DEFAULT_CAPTIONS,
 	drawCaptions,
 	ensureCaptionFonts,
@@ -107,11 +108,15 @@ type Sized = { width: number; height: number; adjust: Adjust };
  */
 function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: CellStyle): (PlanItem | null)[] {
 	const boxed = style.fill.on;
+	const ins = style.captions.on ? captionInsets(style.captions) : { top: 0, bottom: 0 };
 	return layout.cells.map((cell, i) => {
 		const img = sizes[i];
 		if (!img) return null;
 		const pad = boxed ? Math.max(0, Math.min(style.fill.padding, cell.w / 2 - 1, cell.h / 2 - 1)) : 0;
-		const inner = { x: cell.x + pad, y: cell.y + pad, w: cell.w - 2 * pad, h: cell.h - 2 * pad };
+		// Captions inside the cell take room from the image.
+		const top = Math.min(ins.top, cell.h * 0.45);
+		const bottom = Math.min(ins.bottom, cell.h * 0.45);
+		const inner = { x: cell.x + pad, y: cell.y + pad + top, w: cell.w - 2 * pad, h: Math.max(1, cell.h - 2 * pad - top - bottom) };
 		const place = placeImage(img.width, img.height, inner, fit, img.adjust);
 		if (boxed) {
 			const pct = style.corners.on ? Math.min(100, Math.max(0, style.corners.radius)) : 0;

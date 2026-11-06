@@ -5,7 +5,7 @@
 <script lang="ts">
 	import { slide } from 'svelte/transition';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
+	import * as Select from '$lib/components/ui/select/index.js';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import FontPicker from './font-picker.svelte';
 	import SliderField from './slider-field.svelte';
@@ -15,6 +15,12 @@
 
 	let { title, value = $bindable(), maxSize }: { title: string; value: TextStyle; maxSize: number } = $props();
 	let more = $state(false);
+	const POSITIONS: { value: TextStyle['position']; label: string }[] = [
+		{ value: 'above', label: 'Above image' },
+		{ value: 'top', label: 'Inside top' },
+		{ value: 'bottom', label: 'Inside bottom' },
+		{ value: 'below', label: 'Below image' }
+	];
 	const id = $derived(`caption-${title.toLowerCase()}`);
 </script>
 
@@ -44,16 +50,14 @@
 					<ColorField label="Color" bind:value={value.color} />
 					<div class="flex items-center justify-between">
 						<span class="text-sm">Position</span>
-						<ToggleGroup.Root
-							type="single"
-							variant="outline"
-							size="sm"
-							value={value.position}
-							onValueChange={(v) => v && (value.position = v as TextStyle['position'])}
-						>
-							<ToggleGroup.Item value="above" class="px-3">Above</ToggleGroup.Item>
-							<ToggleGroup.Item value="below" class="px-3">Below</ToggleGroup.Item>
-						</ToggleGroup.Root>
+						<Select.Root type="single" value={value.position} onValueChange={(v) => v && (value.position = v as TextStyle['position'])}>
+							<Select.Trigger size="sm" class="w-36" data-testid="{id}-position">{POSITIONS.find((p) => p.value === value.position)?.label}</Select.Trigger>
+							<Select.Content>
+								{#each POSITIONS as p (p.value)}
+									<Select.Item value={p.value} label={p.label}>{p.label}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
 					</div>
 					<SliderField label="Top padding" bind:value={value.padTop} max={Math.max(60, maxSize)} />
 					<SliderField label="Bottom padding" bind:value={value.padBottom} max={Math.max(60, maxSize)} />
