@@ -1533,6 +1533,44 @@
 				<PaneScroll testid="pane">
 				{#if paneTab === 'layout'}
 				<section class="pane-section space-y-3">
+					<h2 class="pane-title">Canvas</h2>
+					<div class="flex items-center justify-between">
+						<span class="flex items-center gap-1.5 text-sm">
+							Size
+							<InfoTip text="Long edge sizes set the longer side, and the other follows from the grid. Social sizes are fixed, and the grid is fitted inside." />
+						</span>
+						<Select.Root type="single" value={size} onValueChange={pickSize}>
+							<Select.Trigger size="sm" class="w-36" data-testid="size">{sizeLabel}</Select.Trigger>
+							<Select.Content>
+								<Select.Group>
+									<Select.GroupHeading>Long edge</Select.GroupHeading>
+									{#each SIZES as s (s.value)}
+										<Select.Item value={s.value} label={s.label}>{s.label}</Select.Item>
+									{/each}
+								</Select.Group>
+								<Select.Separator />
+								<Select.Group>
+									<Select.GroupHeading>Social</Select.GroupHeading>
+									{#each FRAMES as f (f.value)}
+										<Select.Item value={f.value} label={f.label}>
+											<span class="flex-1">{f.label}</span>
+											<span class="text-muted-foreground text-xs tabular-nums">{f.w}×{f.h}</span>
+										</Select.Item>
+									{/each}
+								</Select.Group>
+							</Select.Content>
+						</Select.Root>
+					</div>
+					{#if size === 'custom'}
+						<SliderField label="Long edge" bind:value={customSize} min={480} max={8000} step={20} />
+					{/if}
+					<div class="text-muted-foreground flex items-center justify-between text-sm tabular-nums" data-testid="dims">
+						<span>{layout.width} × {layout.height} px</span>
+						<span>{layout.used} / {images.length}</span>
+					</div>
+				</section>
+
+				<section class="pane-section space-y-3">
 					<div class="flex items-center justify-between">
 						<h2 class="pane-title">Grid</h2>
 						<Tooltip.Root>
@@ -1620,14 +1658,14 @@
 					</SliderField>
 				</section>
 
-				<ToggleSection title="Rounded corners" bind:on={style.corners.on}>
-					<SliderField label="Radius" bind:value={style.corners.radius} unit="%" />
-				</ToggleSection>
 				{:else if paneTab === 'style'}
 				<section class="pane-section flex items-center justify-between">
 					<h2 class="pane-title">Look</h2>
 					<LooksMenu current={currentLook} onapply={useLook} />
 				</section>
+				<ToggleSection title="Rounded corners" bind:on={style.corners.on}>
+					<SliderField label="Radius" bind:value={style.corners.radius} unit="%" />
+				</ToggleSection>
 				<ToggleSection title="Cell background" bind:on={style.fill.on}>
 					<BackgroundPicker
 						bind:value={style.fill.bgId}
@@ -1705,45 +1743,10 @@
 				</section>
 				{:else}
 				<section class="pane-section space-y-3">
-					<h2 class="pane-title">Output</h2>
-					<div class="flex items-center justify-between">
-						<span class="flex items-center gap-1.5 text-sm">
-							Size
-							<InfoTip text="Long edge sizes set the longer side, and the other follows from the grid. Social sizes are fixed, and the grid is fitted inside." />
-						</span>
-						<Select.Root type="single" value={size} onValueChange={pickSize}>
-							<Select.Trigger size="sm" class="w-36" data-testid="size">{sizeLabel}</Select.Trigger>
-							<Select.Content>
-								<Select.Group>
-									<Select.GroupHeading>Long edge</Select.GroupHeading>
-									{#each SIZES as s (s.value)}
-										<Select.Item value={s.value} label={s.label}>{s.label}</Select.Item>
-									{/each}
-								</Select.Group>
-								<Select.Separator />
-								<Select.Group>
-									<Select.GroupHeading>Social</Select.GroupHeading>
-									{#each FRAMES as f (f.value)}
-										<Select.Item value={f.value} label={f.label}>
-											<span class="flex-1">{f.label}</span>
-											<span class="text-muted-foreground text-xs tabular-nums">{f.w}×{f.h}</span>
-										</Select.Item>
-									{/each}
-								</Select.Group>
-							</Select.Content>
-						</Select.Root>
+					<div class="flex items-baseline justify-between">
+						<h2 class="pane-title">Image</h2>
+						<span class="text-muted-foreground text-sm tabular-nums">{layout.width} × {layout.height} px</span>
 					</div>
-					{#if size === 'custom'}
-						<SliderField label="Long edge" bind:value={customSize} min={480} max={8000} step={20} />
-					{/if}
-					<div class="text-muted-foreground flex items-center justify-between text-sm tabular-nums" data-testid="dims">
-						<span>{layout.width} × {layout.height} px</span>
-						<span>{layout.used} / {images.length}</span>
-					</div>
-				</section>
-
-				<section class="pane-section space-y-3">
-					<h2 class="pane-title">Image</h2>
 					<div class="bg-muted flex rounded-md p-0.5" role="radiogroup" aria-label="Format">
 						{#each FORMATS as f (f.id)}
 							<button
@@ -1797,7 +1800,7 @@
 
 			<main class="flex min-w-0 flex-col md:min-h-0 md:flex-1">
 				{#if showingExamples && !welcomeDismissed}
-					<div class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2.5" data-testid="welcome">
+					<div class="flex min-h-[49px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-1.5" data-testid="welcome">
 						<p class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm">
 							<span class="font-medium">This is the sample grid.</span>
 							<span class="text-muted-foreground">Drag in images to replace it, or start from scratch.</span>
