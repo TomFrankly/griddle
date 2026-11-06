@@ -33,6 +33,9 @@
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Undo2Icon from '@lucide/svelte/icons/undo-2';
 	import Redo2Icon from '@lucide/svelte/icons/redo-2';
+	import LinkIcon from '@lucide/svelte/icons/link-2';
+	import UnlinkIcon from '@lucide/svelte/icons/unlink-2';
+	import { Toggle } from '$lib/components/ui/toggle/index.js';
 	import { computeLayout } from '$lib/grid';
 	import {
 		canvasToBlob,
@@ -81,8 +84,9 @@
 	let rows = $state(3);
 	let aspect = $state('1:1');
 	let fit = $state<FitMode>('fill');
-	let gap = $state(8);
-	let padding = $state(8);
+	let gap = $state(24);
+	let padding = $state(24);
+	let linkPadding = $state(true);
 	let bgId = $state('white');
 	let customColor = $state('#f4f1ea');
 	let bgImage = $state<{ bitmap: ImageBitmap; url: string; name: string } | null>(null);
@@ -154,6 +158,10 @@
 		);
 	});
 
+	$effect(() => {
+		if (linkPadding) padding = gap;
+	});
+
 	let showingExamples = $state(false);
 	let welcomeDismissed = $state(false);
 
@@ -167,6 +175,7 @@
 		fit: FitMode;
 		gap: number;
 		padding: number;
+		linkPadding: boolean;
 		bgId: string;
 		customColor: string;
 		style: CellStyle;
@@ -190,6 +199,7 @@
 			fit,
 			gap,
 			padding,
+			linkPadding,
 			bgId,
 			customColor,
 			style: $state.snapshot(style),
@@ -246,6 +256,7 @@
 		fit = snap.fit;
 		gap = snap.gap;
 		padding = snap.padding;
+		linkPadding = snap.linkPadding;
 		bgId = snap.bgId === 'image' && !bgImage ? 'white' : snap.bgId;
 		customColor = snap.customColor;
 		style = structuredClone(snap.style);
@@ -668,10 +679,38 @@
 					</div>
 					<div class="space-y-2.5">
 						<div class="flex items-center justify-between">
-							<span class="text-sm">Edge padding</span>
-							<span class="text-muted-foreground text-sm tabular-nums">{padding} px</span>
+							<div class="flex items-center gap-1">
+								<span class="text-sm" class:text-muted-foreground={linkPadding}>Edge padding</span>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										{#snippet child({ props })}
+											<Toggle
+												{...props}
+												size="sm"
+												class="size-6 min-w-6 p-0"
+												bind:pressed={linkPadding}
+												aria-label="Match edge padding to gap"
+												data-testid="link-padding"
+											>
+												{#if linkPadding}<LinkIcon class="size-3.5" />{:else}<UnlinkIcon class="size-3.5" />{/if}
+											</Toggle>
+										{/snippet}
+									</Tooltip.Trigger>
+									<Tooltip.Content>{linkPadding ? 'Matches the gap. Click to set it separately.' : 'Match the gap'}</Tooltip.Content>
+								</Tooltip.Root>
+							</div>
+							<span class="text-muted-foreground text-sm tabular-nums">{linkPadding ? gap : padding} px</span>
 						</div>
-						<Slider type="single" bind:value={padding} min={0} max={spaceMax * 2} step={1} aria-label="Edge padding" />
+						<Slider
+							type="single"
+							bind:value={padding}
+							min={0}
+							max={spaceMax * 2}
+							step={1}
+							disabled={linkPadding}
+							class={linkPadding ? 'opacity-40' : ''}
+							aria-label="Edge padding"
+						/>
 					</div>
 				</section>
 

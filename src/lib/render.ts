@@ -159,31 +159,32 @@ function drawBorders(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle) {
 	ctx.restore();
 }
 
-/** Lines through the middle of the gaps: one between rows, and between neighbours in each row. */
+/**
+ * Lines through the middle of the gaps, reaching the canvas edges: full-width lines between rows,
+ * and lines between neighbours in each row that run up and down to meet them. All lines are
+ * filled as one path so crossings aren't drawn twice.
+ */
 function drawLines(ctx: Ctx, layout: Layout, style: CellStyle) {
 	const l = style.lines;
 	if (!l.on || l.width <= 0 || !layout.cells.length) return;
-	const cells = layout.cells;
-	const left = Math.min(...cells.map((c) => c.x));
-	const right = Math.max(...cells.map((c) => c.x + c.w));
 	const rows: Rect[][] = [];
-	for (let i = 0; i < cells.length; i++) (rows[Math.floor(i / layout.cols)] ??= []).push(cells[i]);
+	layout.cells.forEach((c, i) => (rows[Math.floor(i / layout.cols)] ??= []).push(c));
+	const w = l.width;
+	const between = (r: number) => (rows[r][0].y + rows[r][0].h + rows[r + 1][0].y) / 2;
 	ctx.save();
 	ctx.fillStyle = withAlpha(l.color, l.opacity);
-	const w = l.width;
+	ctx.beginPath();
 	for (let r = 0; r < rows.length; r++) {
 		const row = rows[r];
-		const top = row[0].y;
-		const bottom = row[0].y + row[0].h;
+		const top = r === 0 ? 0 : between(r - 1);
+		const bottom = r + 1 < rows.length ? between(r) : layout.height;
 		for (let c = 0; c + 1 < row.length; c++) {
 			const mid = (row[c].x + row[c].w + row[c + 1].x) / 2;
-			ctx.fillRect(mid - w / 2, top, w, bottom - top);
+			ctx.rect(mid - w / 2, top, w, bottom - top);
 		}
-		if (r + 1 < rows.length) {
-			const mid = (bottom + rows[r + 1][0].y) / 2;
-			ctx.fillRect(left, mid - w / 2, right - left, w);
-		}
+		if (r + 1 < rows.length) ctx.rect(0, between(r) - w / 2, layout.width, w);
 	}
+	ctx.fill();
 	ctx.restore();
 }
 
