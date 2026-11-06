@@ -1,17 +1,22 @@
 # Griddle
 
-Make a grid of images! Drop in any number of images and get one grid image back. Everything runs in your browser with canvas; your images never leave your device.
+Make a grid of images! Drop in any number of images and get one grid image back. Everything runs in your browser with canvas; your images never leave your device. (Caption fonts other than Inter are loaded from Google Fonts when you pick them.)
 
-- Columns and rows, with a partly filled last row centered
+- Columns and rows (or automatic), with a partly filled last row centered
+- Images can span several cells, for bento layouts
 - Cell shapes: square, 4:3, 3:2, 16:9, 5:4, 21:9 and their portrait versions
 - Fill (crop) or fit; drag an image in the preview to move it, hover for a zoom slider and reset
 - Drop an image on a cell to replace it
 - Rounded corners, borders, drop shadows and divider lines
+- Captions: a title and description per image, with rich text, any Google Font, size, color, shadow and position
+- Looks: built-in and saved combinations of spacing, style and background
 - Undo and redo (Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z or Ctrl+Y)
 - Gap and edge padding
 - Backgrounds: transparent, white, black, any color, gradient and dot-grid presets, or your own image
-- Output size presets (long edge) or a custom size
-- Download PNG or JPG, or copy to the clipboard
+- Output size presets (long edge), social post sizes, or a custom size
+- Download PNG, JPG or WebP (with quality), or copy to the clipboard
+- Paste an image while hovering a cell to replace it
+- Your grid and settings are kept in this browser between visits
 - Light and dark themes
 
 ## Develop

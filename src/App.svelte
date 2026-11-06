@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { exampleFiles } from '$lib/examples';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
@@ -12,6 +12,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import { Slider } from '$lib/components/ui/slider/index.js';
+	import { Switch } from '$lib/components/ui/switch/index.js';
 	import InfoTip from '$lib/components/info-tip.svelte';
 	import Stepper from '$lib/components/stepper.svelte';
 	import ColorPicker from '$lib/components/color-picker.svelte';
@@ -28,7 +29,6 @@
 	import ArrowDownAZIcon from '@lucide/svelte/icons/arrow-down-a-z';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import XIcon from '@lucide/svelte/icons/x';
-	import WandIcon from '@lucide/svelte/icons/wand-sparkles';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Undo2Icon from '@lucide/svelte/icons/undo-2';
@@ -36,7 +36,15 @@
 	import LinkIcon from '@lucide/svelte/icons/link-2';
 	import UnlinkIcon from '@lucide/svelte/icons/unlink-2';
 	import { Toggle } from '$lib/components/ui/toggle/index.js';
-	import { computeLayout } from '$lib/grid';
+	import { autoGrid, computeLayout } from '$lib/grid';
+	import { captionBands, ensureCaptionFonts, fromPlain } from '$lib/captions';
+	import TextStyleFields from '$lib/components/text-style-fields.svelte';
+	import LooksMenu from '$lib/components/looks-menu.svelte';
+	import AlignLeftIcon from '@lucide/svelte/icons/align-left';
+	import AlignCenterIcon from '@lucide/svelte/icons/align-center';
+	import AlignRightIcon from '@lucide/svelte/icons/align-right';
+	import { applyLook, scaleStyle, type Look } from '$lib/looks';
+	import { loadFiles, loadSettings, saveSettings, syncFiles } from '$lib/persist';
 	import {
 		canvasToBlob,
 		decode,
@@ -66,6 +74,7 @@
 		{ value: '4:5', label: '4:5', ratio: 4 / 5 },
 		{ value: '21:9', label: '21:9', ratio: 21 / 9 }
 	];
+	const FILL_FRAME = { value: 'auto', label: 'Fill frame', ratio: 0 };
 
 	const SIZES = [
 		{ value: '1080', label: '1080 px' },
@@ -75,6 +84,17 @@
 		{ value: '3840', label: '3840 px (4K)' },
 		{ value: '5120', label: '5120 px (5K)' },
 		{ value: 'custom', label: 'Custom' }
+	];
+	/** Fixed output sizes for social posts; the grid is fitted inside. */
+	const FRAMES = [
+		{ value: 'ig-square', label: 'Instagram post', short: 'IG post', w: 1080, h: 1080 },
+		{ value: 'ig-portrait', label: 'Instagram portrait', short: 'IG portrait', w: 1080, h: 1350 },
+		{ value: 'story', label: 'Story or Reel', short: 'Story', w: 1080, h: 1920 },
+		{ value: 'x-post', label: 'X post', short: 'X post', w: 1600, h: 900 },
+		{ value: 'linkedin', label: 'LinkedIn post', short: 'LinkedIn', w: 1200, h: 627 },
+		{ value: 'youtube', label: 'YouTube thumbnail', short: 'YouTube', w: 1280, h: 720 },
+		{ value: 'pinterest', label: 'Pinterest pin', short: 'Pinterest', w: 1000, h: 1500 },
+		{ value: 'link', label: 'Link preview', short: 'Link preview', w: 1200, h: 630 }
 	];
 
 	const GROUPS: PaintGroup[] = ['Solid', 'Gradients', 'Patterns'];
@@ -93,6 +113,9 @@
 	let style = $state<CellStyle>(structuredClone(DEFAULT_STYLE));
 	let size = $state('1920');
 	let customSize = $state(3000);
+	let autoLayout = $state(true);
+	let quality = $state(92);
+	let fontTick = $state(0);
 
 	let loading = $state(0);
 	let busy = $state(false);
@@ -103,9 +126,34 @@
 	let stageW = $state(0);
 	let stageH = $state(0);
 
-	const ratio = $derived(ASPECTS.find((a) => a.value === aspect)?.ratio ?? 1);
-	const longEdge = $derived(size === 'custom' ? customSize : Number(size));
+	const frame = $derived(FRAMES.find((f) => f.value === size) ?? null);
+	const aspectOptions = $derived(frame ? [FILL_FRAME, ...ASPECTS] : ASPECTS);
+	const ratio = $derived(aspect === 'auto' ? (frame ? 0 : 1) : (ASPECTS.find((a) => a.value === aspect)?.ratio ?? 1));
+	const longEdge = $derived(frame ? Math.max(frame.w, frame.h) : size === 'custom' ? customSize : Number(size));
 	const spaceMax = $derived(Math.max(40, Math.round(longEdge / 10)));
+	const sizeLabel = $derived(frame ? frame.short : (SIZES.find((x) => x.value === size)?.label ?? size));
+
+	// Pixel settings scale with the output size, so switching sizes keeps the same look.
+	let lastLongEdge = 1920;
+	$effect(() => {
+		const next = longEdge;
+		const prev = lastLongEdge;
+		lastLongEdge = next;
+		if (prev === next) return;
+		untrack(() => {
+			const k = next / prev;
+			gap = Math.round(gap * k);
+			padding = Math.round(padding * k);
+			style = scaleStyle($state.snapshot(style) as CellStyle, k);
+		});
+	});
+
+	function pickSize(v: string) {
+		const toFrame = FRAMES.some((f) => f.value === v);
+		if (toFrame && !frame) aspect = 'auto';
+		if (!toFrame && aspect === 'auto') aspect = '1:1';
+		size = v;
+	}
 	const background = $derived.by((): Background => {
 		if (bgId === 'none') return { kind: 'none' };
 		if (bgId === 'white') return { kind: 'color', color: '#ffffff' };
@@ -116,11 +164,68 @@
 		if (preset) return { kind: 'paint', id: preset.id, paint: preset.paint };
 		return { kind: 'color', color: '#ffffff' };
 	});
-	const layout = $derived(
-		computeLayout({ count: Math.max(images.length, 1), cols, rows, aspect: ratio, longEdge, gutter: gap, padding })
+	const spans = $derived(images.map((i) => ({ w: i.span.w, h: i.span.h })));
+	const grid = $derived(
+		autoLayout && images.length ? autoGrid(spans, ratio || 1, frame ? frame.w / frame.h : 1) : { cols, rows }
 	);
-	const capacity = $derived(cols * rows);
-	const unused = $derived(Math.max(0, images.length - capacity));
+	const bands = $derived(captionBands(style.captions));
+	const layout = $derived(
+		computeLayout({
+			count: Math.max(images.length, 1),
+			spans,
+			cols: grid.cols,
+			rows: grid.rows,
+			aspect: ratio,
+			longEdge,
+			frame: frame ? { w: frame.w, h: frame.h } : null,
+			gutter: gap,
+			padding,
+			bandAbove: bands.above,
+			bandBelow: bands.below
+		})
+	);
+	const unused = $derived(Math.max(0, images.length - layout.used));
+
+	/** The steppers show the automatic grid; changing one switches to manual. */
+	const colsBinding = {
+		get: () => grid.cols,
+		set: (v: number) => {
+			if (autoLayout) rows = grid.rows;
+			autoLayout = false;
+			cols = v;
+		}
+	};
+	const rowsBinding = {
+		get: () => grid.rows,
+		set: (v: number) => {
+			if (autoLayout) cols = grid.cols;
+			autoLayout = false;
+			rows = v;
+		}
+	};
+
+	$effect(() => {
+		const c = $state.snapshot(style.captions);
+		ensureCaptionFonts(c).then(() => fontTick++);
+	});
+
+	function currentLook(): Look {
+		return { gap, padding, linkPadding, fit, style: $state.snapshot(style) as CellStyle, bgId, customColor, ref: longEdge };
+	}
+	function useLook(look: Look) {
+		const v = applyLook(look, longEdge);
+		gap = v.gap;
+		padding = v.padding;
+		linkPadding = v.linkPadding;
+		fit = v.fit;
+		style = v.style;
+		bgId = v.bgId === 'image' && !bgImage ? 'white' : v.bgId;
+		customColor = v.customColor;
+	}
+
+	function useFileNames() {
+		for (const img of images) img.title = fromPlain(img.name.replace(/\.[^.]+$/, ''));
+	}
 
 	const preview = $derived.by(() => {
 		const pad = stageW < 640 ? 12 : 32;
@@ -152,10 +257,13 @@
 				if (!img) return null;
 				// Read each field so changes to it redraw the preview.
 				const adjust = { zoom: img.adjust.zoom, ox: img.adjust.ox, oy: img.adjust.oy };
-				return { source: img.thumb, width: img.width, height: img.height, adjust };
+				const title = $state.snapshot(img.title);
+				const desc = $state.snapshot(img.desc);
+				return { source: img.thumb, width: img.width, height: img.height, adjust, title, desc };
 			},
-			{ background, fit, style, scale: w / layout.width }
+			{ background, fit, style: $state.snapshot(style) as CellStyle, scale: w / layout.width }
 		);
+		void fontTick;
 	});
 
 	$effect(() => {
@@ -168,7 +276,9 @@
 	// Undo and redo. Each entry is a snapshot of the composition; images are referenced by id and
 	// kept decoded in `pool` until no snapshot uses them.
 	type Snapshot = {
-		images: { id: string; adjust: GridImage['adjust'] }[];
+		images: { id: string; adjust: GridImage['adjust']; span: GridImage['span']; title: GridImage['title']; desc: GridImage['desc'] }[];
+		autoLayout: boolean;
+		quality: number;
 		cols: number;
 		rows: number;
 		aspect: string;
@@ -192,7 +302,15 @@
 
 	function capture(): Snapshot {
 		return {
-			images: images.map((i) => ({ id: i.id, adjust: { zoom: i.adjust.zoom, ox: i.adjust.ox, oy: i.adjust.oy } })),
+			images: images.map((i) => ({
+				id: i.id,
+				adjust: { zoom: i.adjust.zoom, ox: i.adjust.ox, oy: i.adjust.oy },
+				span: { w: i.span.w, h: i.span.h },
+				title: $state.snapshot(i.title),
+				desc: $state.snapshot(i.desc)
+			})),
+			autoLayout,
+			quality,
 			cols,
 			rows,
 			aspect,
@@ -216,6 +334,55 @@
 		current = { snap, key };
 		future = [];
 		prune();
+		persist();
+	}
+
+	// Keep the grid across reloads (this browser only).
+	type Saved = { v: 1; snap: Snapshot; welcomeDismissed: boolean };
+	let persistTimer: ReturnType<typeof setTimeout> | undefined;
+	function persist() {
+		clearTimeout(persistTimer);
+		persistTimer = setTimeout(() => {
+			if (!current) return;
+			const snap = current.snap;
+			saveSettings({ v: 1, snap, welcomeDismissed } satisfies Saved);
+			const files = snap.showingExamples
+				? []
+				: snap.images.flatMap((i) => {
+						const img = pool.get(i.id);
+						return img ? [{ id: i.id, file: img.file }] : [];
+					});
+			syncFiles(files);
+		}, 500);
+	}
+
+	/** Brings back the last session: its images if they were your own, and all its settings. */
+	async function resume(): Promise<boolean> {
+		const saved = loadSettings<Saved>();
+		if (!saved || saved.v !== 1 || !saved.snap) return false;
+		welcomeDismissed = !!saved.welcomeDismissed;
+		const snap = saved.snap;
+		if (!snap.showingExamples && snap.images.length) {
+			const files = await loadFiles(snap.images.map((i) => i.id));
+			loading += files.size;
+			for (const [id, file] of files) {
+				try {
+					const img = await loadImage(file);
+					img.id = id;
+					pool.set(id, img);
+				} catch {
+					// A stored file that can't be read is skipped.
+				}
+			}
+			loading -= files.size;
+			if (!snap.images.some((i) => pool.has(i.id))) return false;
+			restore(snap);
+			return true;
+		}
+		await addFiles(await exampleFiles(), true);
+		const live = capture();
+		restore({ ...snap, images: live.images, showingExamples: live.showingExamples });
+		return true;
 	}
 
 	function flush() {
@@ -246,10 +413,12 @@
 	});
 
 	function restore(snap: Snapshot) {
-		images = snap.images.flatMap(({ id, adjust }) => {
+		images = snap.images.flatMap(({ id, adjust, span, title, desc }) => {
 			const img = pool.get(id);
-			return img ? [{ ...img, adjust: { ...adjust } }] : [];
+			return img ? [{ ...img, adjust: { ...adjust }, span: { ...span }, title: structuredClone(title), desc: structuredClone(desc) }] : [];
 		});
+		autoLayout = snap.autoLayout;
+		quality = snap.quality;
 		cols = snap.cols;
 		rows = snap.rows;
 		aspect = snap.aspect;
@@ -262,6 +431,11 @@
 		style = structuredClone(snap.style);
 		size = snap.size;
 		customSize = snap.customSize;
+		lastLongEdge = FRAMES.find((f) => f.value === snap.size)
+			? Math.max(...[FRAMES.find((f) => f.value === snap.size)!].map((f) => Math.max(f.w, f.h)))
+			: snap.size === 'custom'
+				? snap.customSize
+				: Number(snap.size);
 		showingExamples = snap.showingExamples;
 		current = { snap, key: JSON.stringify(snap) };
 	}
@@ -395,9 +569,6 @@
 	function resetAll() {
 		for (const img of images) img.adjust = { zoom: 1, ox: 0, oy: 0 };
 	}
-	function fitRows() {
-		rows = Math.max(1, Math.ceil(images.length / cols));
-	}
 
 	const fileName = (ext: string) => `griddle-${layout.cols}x${layout.rows}-${layout.width}x${layout.height}.${ext}`;
 
@@ -406,11 +577,11 @@
 		busy = true;
 		try {
 			const full = await renderFull(layout, images, { background, fit, style: $state.snapshot(style), opaque: format === 'jpeg' });
-			const blob = await canvasToBlob(full, format);
+			const blob = await canvasToBlob(full, format, quality / 100);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = fileName(format === 'jpeg' ? 'jpg' : 'png');
+			a.download = fileName(format === 'jpeg' ? 'jpg' : format);
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -443,11 +614,21 @@
 
 	// Reordering thumbnails
 	let dragId = $state<string | null>(null);
-	let overId = $state<string | null>(null);
-	function onThumbDrop(targetId: string) {
-		if (!dragId || dragId === targetId) return;
+	/** Where a dragged thumbnail would go: before the image at this index (length means last). */
+	let insertAt = $state<number | null>(null);
+	function onThumbOver(e: DragEvent, i: number) {
+		if (!dragId) return;
+		e.preventDefault();
+		const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		insertAt = e.clientX < box.left + box.width / 2 ? i : i + 1;
+	}
+	function onThumbDrop() {
 		const from = images.findIndex((i) => i.id === dragId);
-		const to = images.findIndex((i) => i.id === targetId);
+		const at = insertAt;
+		dragId = insertAt = null;
+		if (from < 0 || at === null) return;
+		const to = at > from ? at - 1 : at;
+		if (to === from) return;
 		const next = [...images];
 		const [moved] = next.splice(from, 1);
 		next.splice(to, 0, moved);
@@ -473,9 +654,17 @@
 		dragDepth = 0;
 		addFiles(e.dataTransfer?.files);
 	}
+	/** Pasting while the pointer is over a cell replaces that image; anywhere else adds. */
 	function onPaste(e: ClipboardEvent) {
+		const t = e.target as HTMLElement | null;
+		if (t?.closest('input, textarea, [contenteditable="true"]')) return;
 		const files = Array.from(e.clipboardData?.files ?? []);
-		if (files.length) addFiles(files);
+		if (!files.length) return;
+		e.preventDefault();
+		const hovered = document.querySelector<HTMLElement>('[data-testid=cell]:hover');
+		const index = hovered ? Number(hovered.dataset.index) : NaN;
+		if (Number.isInteger(index)) replaceAt(index, files);
+		else addFiles(files);
 	}
 
 	onDestroy(() => {
@@ -484,8 +673,19 @@
 	});
 
 	onMount(async () => {
-		if (!images.length) await addFiles(await exampleFiles(), true);
+		let resumed = false;
+		try {
+			resumed = await resume();
+		} catch {
+			resumed = false;
+		}
+		if (!resumed && !images.length) await addFiles(await exampleFiles(), true);
 		resetHistory();
+	});
+
+	$effect(() => {
+		void welcomeDismissed;
+		untrack(() => current && persist());
 	});
 
 	const labelOf = (list: { value: string; label: string }[], v: string) => list.find((x) => x.value === v)?.label ?? v;
@@ -562,15 +762,10 @@
 	<div class="flex min-h-dvh flex-col md:h-dvh">
 		<header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
 			<div class="flex items-center gap-2">
-				<svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-					<rect x="1" y="1" width="6" height="6" fill="currentColor" />
-					<rect x="9" y="1" width="6" height="6" fill="currentColor" />
-					<rect x="1" y="9" width="6" height="6" fill="currentColor" />
-					<rect x="9" y="9" width="6" height="6" fill="currentColor" opacity=".35" />
-				</svg>
 				<span class="font-logo text-[22px] leading-none italic">Griddle</span>
 			</div>
 			<div class="ml-auto flex items-center gap-1.5">
+				<LooksMenu current={currentLook} onapply={useLook} />
 				<div class="flex items-center">
 					{@render iconAction(`Undo (${mod}Z)`, Undo2Icon, undo, !past.length)}
 					{@render iconAction(isMac ? 'Redo (⇧⌘Z)' : 'Redo (Ctrl+Y)', Redo2Icon, redo, !future.length)}
@@ -613,9 +808,18 @@
 							</Button>
 						{/snippet}
 					</DropdownMenu.Trigger>
-					<DropdownMenu.Content align="end" class="w-40">
+					<DropdownMenu.Content align="end" class="w-48">
 						<DropdownMenu.Item onclick={() => download('png')} data-testid="download-png">PNG</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => download('jpeg')} data-testid="download-jpg">JPG</DropdownMenu.Item>
+						<DropdownMenu.Item onclick={() => download('webp')} data-testid="download-webp">WebP</DropdownMenu.Item>
+						<DropdownMenu.Separator />
+						<div class="space-y-2 px-2 py-2">
+							<div class="flex items-center justify-between text-xs">
+								<span>Quality <span class="text-muted-foreground">· JPG, WebP</span></span>
+								<span class="text-muted-foreground tabular-nums">{quality}%</span>
+							</div>
+							<Slider type="single" bind:value={quality} min={40} max={100} step={1} aria-label="Quality" />
+						</div>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
 			</div>
@@ -624,27 +828,33 @@
 		<div class="flex flex-col-reverse md:min-h-0 md:flex-1 md:flex-row">
 			<aside class="shrink-0 border-t md:w-80 md:overflow-y-auto md:border-t-0 md:border-r">
 				<section class="space-y-3 border-b p-4">
-					<h2 class="text-muted-foreground text-xs font-medium">Grid</h2>
 					<div class="flex items-center justify-between">
-						<span class="text-sm">Columns</span>
-						<Stepper bind:value={cols} label="Columns" />
+						<h2 class="text-muted-foreground text-xs font-medium">Grid</h2>
+						<label class="flex cursor-pointer items-center gap-2 text-sm" for="auto-layout">
+							<span class="flex items-center gap-1.5">
+								Auto
+								<InfoTip text="Picks columns and rows to fit your images. Changing either one switches to manual." />
+							</span>
+							<Switch id="auto-layout" size="sm" bind:checked={autoLayout} data-testid="auto-layout" />
+						</label>
 					</div>
 					<div class="flex items-center justify-between">
-						<span class="flex items-center gap-1.5 text-sm">
+						<span class="text-sm" class:text-muted-foreground={autoLayout}>Columns</span>
+						<Stepper bind:value={colsBinding.get, colsBinding.set} label="Columns" />
+					</div>
+					<div class="flex items-center justify-between">
+						<span class="flex items-center gap-1.5 text-sm" class:text-muted-foreground={autoLayout}>
 							Rows
-							<InfoTip text="Rows without images are left out. A partly filled last row is centered." />
+							<InfoTip text="Rows without images are left out. A partly filled last row is centered. Hover an image to make it span more cells." />
 						</span>
-						<div class="flex items-center gap-1">
-							{@render iconAction('Fit rows to images', WandIcon, fitRows, !images.length)}
-							<Stepper bind:value={rows} label="Rows" />
-						</div>
+						<Stepper bind:value={rowsBinding.get, rowsBinding.set} label="Rows" />
 					</div>
 					<div class="flex items-center justify-between">
 						<span class="text-sm">Cell shape</span>
 						<Select.Root type="single" bind:value={aspect}>
-							<Select.Trigger size="sm" class="w-32" data-testid="aspect">{labelOf(ASPECTS, aspect)}</Select.Trigger>
+							<Select.Trigger size="sm" class="w-32" data-testid="aspect">{labelOf(aspectOptions, aspect)}</Select.Trigger>
 							<Select.Content>
-								{#each ASPECTS as a (a.value)}
+								{#each aspectOptions as a (a.value)}
 									<Select.Item value={a.value} label={a.label}>{a.label}</Select.Item>
 								{/each}
 							</Select.Content>
@@ -732,6 +942,31 @@
 					<ColorField label="Color" bind:value={style.lines.color} />
 					<SliderField label="Opacity" bind:value={style.lines.opacity} unit="%" />
 				</ToggleSection>
+				<ToggleSection title="Captions" bind:on={style.captions.on}>
+					<div class="flex items-center justify-between">
+						<span class="flex items-center gap-1.5 text-sm">
+							Text
+							<InfoTip text="Hover an image in the preview and click the text button to write its title and description." />
+						</span>
+						<Button variant="outline" size="sm" onclick={useFileNames} disabled={!images.length}>Use file names</Button>
+					</div>
+					<div class="flex items-center justify-between">
+						<span class="text-sm">Align</span>
+						<ToggleGroup.Root
+							type="single"
+							variant="outline"
+							size="sm"
+							value={style.captions.align}
+							onValueChange={(v) => v && (style.captions.align = v as typeof style.captions.align)}
+						>
+							<ToggleGroup.Item value="left" aria-label="Align left"><AlignLeftIcon /></ToggleGroup.Item>
+							<ToggleGroup.Item value="center" aria-label="Align center"><AlignCenterIcon /></ToggleGroup.Item>
+							<ToggleGroup.Item value="right" aria-label="Align right"><AlignRightIcon /></ToggleGroup.Item>
+						</ToggleGroup.Root>
+					</div>
+					<TextStyleFields title="Title" bind:value={style.captions.title} maxSize={Math.max(80, Math.round(longEdge / 12))} />
+					<TextStyleFields title="Description" bind:value={style.captions.desc} maxSize={Math.max(60, Math.round(longEdge / 16))} />
+				</ToggleSection>
 
 				<section class="space-y-3 border-b p-4">
 					<h2 class="text-muted-foreground text-xs font-medium">Background</h2>
@@ -811,14 +1046,27 @@
 					<div class="flex items-center justify-between">
 						<span class="flex items-center gap-1.5 text-sm">
 							Size
-							<InfoTip text="Length of the longer side. The other side follows from the grid and cell shape." />
+							<InfoTip text="Long edge sizes set the longer side, and the other follows from the grid. Social sizes are fixed, and the grid is fitted inside." />
 						</span>
-						<Select.Root type="single" bind:value={size}>
-							<Select.Trigger size="sm" class="w-32" data-testid="size">{labelOf(SIZES, size)}</Select.Trigger>
+						<Select.Root type="single" value={size} onValueChange={pickSize}>
+							<Select.Trigger size="sm" class="w-36" data-testid="size">{sizeLabel}</Select.Trigger>
 							<Select.Content>
-								{#each SIZES as s (s.value)}
-									<Select.Item value={s.value} label={s.label}>{s.label}</Select.Item>
-								{/each}
+								<Select.Group>
+									<Select.GroupHeading>Long edge</Select.GroupHeading>
+									{#each SIZES as s (s.value)}
+										<Select.Item value={s.value} label={s.label}>{s.label}</Select.Item>
+									{/each}
+								</Select.Group>
+								<Select.Separator />
+								<Select.Group>
+									<Select.GroupHeading>Social</Select.GroupHeading>
+									{#each FRAMES as f (f.value)}
+										<Select.Item value={f.value} label={f.label}>
+											<span class="flex-1">{f.label}</span>
+											<span class="text-muted-foreground text-xs tabular-nums">{f.w}×{f.h}</span>
+										</Select.Item>
+									{/each}
+								</Select.Group>
 							</Select.Content>
 						</Select.Root>
 					</div>
@@ -833,7 +1081,7 @@
 					{/if}
 					<div class="text-muted-foreground flex items-center justify-between pt-1 text-sm tabular-nums" data-testid="dims">
 						<span>{layout.width} × {layout.height} px</span>
-						<span>{Math.min(images.length, capacity)} / {capacity}</span>
+						<span>{layout.used} / {images.length}</span>
 					</div>
 				</section>
 			</aside>
@@ -867,6 +1115,9 @@
 										{fit}
 										index={i}
 										onfiles={(files) => replaceAt(i, files)}
+										cols={layout.cols}
+										rows={Math.max(layout.rows, grid.rows)}
+										captions={style.captions}
 										radius={style.corners.on ? (style.corners.radius / 100) * (Math.min(rect.w, rect.h) / 2) : 0}
 									/>
 								{/if}
@@ -918,8 +1169,8 @@
 							{#each images as img, i (img.id)}
 								<li
 									class="group relative size-16 shrink-0 cursor-grab border transition-opacity active:cursor-grabbing"
-									class:opacity-35={i >= capacity}
-									class:border-primary={overId === img.id && dragId !== img.id}
+									class:opacity-35={i >= layout.used && dragId !== img.id}
+									class:opacity-40={dragId === img.id}
 									draggable="true"
 									title={img.name}
 									ondragstart={(e) => {
@@ -927,21 +1178,21 @@
 										e.dataTransfer?.setData('text/plain', img.id);
 										if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 									}}
-									ondragover={(e) => {
-										if (!dragId) return;
-										e.preventDefault();
-										overId = img.id;
-									}}
-									ondragleave={() => overId === img.id && (overId = null)}
+									ondragover={(e) => onThumbOver(e, i)}
 									ondrop={(e) => {
 										if (!dragId) return;
 										e.preventDefault();
 										e.stopPropagation();
-										onThumbDrop(img.id);
-										dragId = overId = null;
+										onThumbDrop();
 									}}
-									ondragend={() => (dragId = overId = null)}
+									ondragend={() => (dragId = insertAt = null)}
 								>
+									{#if dragId && insertAt === i}
+										<span class="bg-primary pointer-events-none absolute -top-1 -bottom-1 -left-[6px] z-10 w-0.5" data-testid="insert-line"></span>
+									{/if}
+									{#if dragId && insertAt === i + 1 && i === images.length - 1}
+										<span class="bg-primary pointer-events-none absolute -top-1 -right-[6px] -bottom-1 z-10 w-0.5" data-testid="insert-line"></span>
+									{/if}
 									<img src={img.thumbUrl} alt={img.name} class="size-full object-cover" draggable="false" />
 									<span class="bg-background/90 absolute bottom-0 left-0 px-1 text-[10px] tabular-nums">{i + 1}</span>
 									<button

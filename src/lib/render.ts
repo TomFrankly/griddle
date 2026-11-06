@@ -1,6 +1,15 @@
 import { DEFAULT_ADJUST, placeImage, type Adjust, type Layout, type Rect } from './grid';
 import { maxPaintSide, paintCanvas } from './paint/paint-gl';
 import type { BackdropPaint } from './paint/presets';
+import {
+	DEFAULT_CAPTIONS,
+	drawCaptions,
+	ensureCaptionFonts,
+	type CaptionStyle,
+	type Captioned,
+	type RichText
+} from './captions';
+import type { Span } from './grid';
 
 export type FitMode = 'fill' | 'fit';
 
@@ -10,7 +19,7 @@ export type Background =
 	| { kind: 'paint'; id: string; paint: BackdropPaint }
 	| { kind: 'image'; image: ImageBitmap };
 
-export type Drawable = { source: CanvasImageSource; width: number; height: number; adjust: Adjust };
+export type Drawable = Captioned & { source: CanvasImageSource; width: number; height: number; adjust: Adjust };
 
 export type GridImage = {
 	id: string;
@@ -22,6 +31,10 @@ export type GridImage = {
 	thumb: ImageBitmap;
 	thumbUrl: string;
 	adjust: Adjust;
+	/** Grid cells this image covers across and down. */
+	span: Span;
+	title: RichText;
+	desc: RichText;
 };
 
 type Ctx = CanvasRenderingContext2D;
@@ -68,13 +81,15 @@ export type CellStyle = {
 	border: { on: boolean; width: number; color: string; opacity: number };
 	shadow: { on: boolean; strength: number; distance: number; softness: number };
 	lines: { on: boolean; width: number; color: string; opacity: number };
+	captions: CaptionStyle;
 };
 
 export const DEFAULT_STYLE: CellStyle = {
 	corners: { on: false, radius: 12 },
 	border: { on: false, width: 4, color: '#ffffff', opacity: 100 },
 	shadow: { on: false, strength: 35, distance: 8, softness: 24 },
-	lines: { on: false, width: 2, color: '#000000', opacity: 25 }
+	lines: { on: false, width: 2, color: '#000000', opacity: 25 },
+	captions: DEFAULT_CAPTIONS
 };
 
 type PlanItem = { cell: Rect; place: Rect; visible: Rect; radius: number };
@@ -131,15 +146,25 @@ function drawShadows(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle, sca
 	ctx.restore();
 }
 
-function drawImage(ctx: Ctx, it: PlanItem, source: CanvasImageSource) {
+/**
+ * `inset` pulls the clip in under an opaque border, so the image's anti-aliased edge can't show
+ * outside it.
+ */
+function drawImage(ctx: Ctx, it: PlanItem, source: CanvasImageSource, inset = 0) {
 	ctx.save();
-	shape(ctx, it.visible, it.radius);
+	const v = it.visible;
+	const d = Math.min(inset, v.w / 2, v.h / 2);
+	shape(ctx, { x: v.x + d, y: v.y + d, w: v.w - 2 * d, h: v.h - 2 * d }, Math.max(0, it.radius - d));
 	ctx.clip();
 	ctx.imageSmoothingEnabled = true;
 	ctx.imageSmoothingQuality = 'high';
 	ctx.drawImage(source, it.place.x, it.place.y, it.place.w, it.place.h);
 	ctx.restore();
 }
+
+/** How far under an opaque border the image can be cut back. */
+const borderInset = (style: CellStyle, scale: number) =>
+	style.border.on && style.border.opacity >= 100 ? Math.min(style.border.width / 2, 1.5 / scale) : 0;
 
 /** Borders sit inside the image's edge, following its corners. */
 function drawBorders(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle) {
@@ -160,30 +185,35 @@ function drawBorders(ctx: Ctx, items: (PlanItem | null)[], style: CellStyle) {
 }
 
 /**
- * Lines through the middle of the gaps, reaching the canvas edges: full-width lines between rows,
- * and lines between neighbours in each row that run up and down to meet them. All lines are
- * filled as one path so crossings aren't drawn twice.
+ * Lines through the middle of the gaps between neighbouring cells, reaching the canvas edges at
+ * the outside of the grid. All lines are filled as one path so crossings aren't drawn twice.
  */
 function drawLines(ctx: Ctx, layout: Layout, style: CellStyle) {
 	const l = style.lines;
 	if (!l.on || l.width <= 0 || !layout.cells.length) return;
-	const rows: Rect[][] = [];
-	layout.cells.forEach((c, i) => (rows[Math.floor(i / layout.cols)] ??= []).push(c));
+	const { slots, cells, gutter: g, bandAbove: ba, bandBelow: bb, cols, rows } = layout;
+	const eps = 1e-6;
 	const w = l.width;
-	const between = (r: number) => (rows[r][0].y + rows[r][0].h + rows[r + 1][0].y) / 2;
+	const top = (i: number) => (slots[i].r === 0 ? 0 : cells[i].y - ba - g / 2);
+	const bottom = (i: number) => (slots[i].r + slots[i].h >= rows ? layout.height : cells[i].y + cells[i].h + bb + g / 2);
+	const left = (i: number) => (slots[i].c < eps ? 0 : cells[i].x - g / 2);
+	const right = (i: number) => (slots[i].c + slots[i].w > cols - eps ? layout.width : cells[i].x + cells[i].w + g / 2);
+	const overlaps = (a0: number, a1: number, b0: number, b1: number) => a0 < b1 - eps && b0 < a1 - eps;
 	ctx.save();
 	ctx.fillStyle = withAlpha(l.color, l.opacity);
 	ctx.beginPath();
-	for (let r = 0; r < rows.length; r++) {
-		const row = rows[r];
-		const top = r === 0 ? 0 : between(r - 1);
-		const bottom = r + 1 < rows.length ? between(r) : layout.height;
-		for (let c = 0; c + 1 < row.length; c++) {
-			const mid = (row[c].x + row[c].w + row[c + 1].x) / 2;
-			ctx.rect(mid - w / 2, top, w, bottom - top);
+	slots.forEach((p, i) => {
+		const hasRight = slots.some((q) => Math.abs(q.c - (p.c + p.w)) < eps && overlaps(p.r, p.r + p.h, q.r, q.r + q.h));
+		if (hasRight) {
+			const x = cells[i].x + cells[i].w + g / 2;
+			ctx.rect(x - w / 2, top(i), w, bottom(i) - top(i));
 		}
-		if (r + 1 < rows.length) ctx.rect(0, between(r) - w / 2, layout.width, w);
-	}
+		const hasBelow = slots.some((q) => Math.abs(q.r - (p.r + p.h)) < eps && overlaps(p.c - 0.5, p.c + p.w + 0.5, q.c, q.c + q.w));
+		if (hasBelow) {
+			const y = cells[i].y + cells[i].h + bb + g / 2;
+			ctx.rect(left(i), y - w / 2, right(i) - left(i), w);
+		}
+	});
 	ctx.fill();
 	ctx.restore();
 }
@@ -204,9 +234,11 @@ export function drawGrid(
 	const imgs = layout.cells.map((_, i) => getImage(i));
 	const items = plan(layout, imgs, opts.fit, opts.style);
 	drawShadows(ctx, items, opts.style, opts.scale);
-	items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source));
+	const inset = borderInset(opts.style, opts.scale);
+	items.forEach((it, i) => it && drawImage(ctx, it, imgs[i]!.source, inset));
 	drawBorders(ctx, items, opts.style);
 	drawLines(ctx, layout, opts.style);
+	drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
@@ -241,11 +273,14 @@ export async function loadImage(file: File): Promise<GridImage> {
 		height,
 		thumb,
 		thumbUrl: URL.createObjectURL(file),
-		adjust: { ...DEFAULT_ADJUST }
+		adjust: { ...DEFAULT_ADJUST },
+		span: { w: 1, h: 1 },
+		title: [],
+		desc: []
 	};
 }
 
-export type ExportFormat = 'png' | 'jpeg';
+export type ExportFormat = 'png' | 'jpeg' | 'webp';
 
 /** Renders the grid at full resolution, decoding each original image one at a time. */
 export async function renderFull(
@@ -258,6 +293,7 @@ export async function renderFull(
 	canvas.height = layout.height;
 	const ctx = canvas.getContext('2d');
 	if (!ctx) throw new Error('Canvas is not available in this browser.');
+	await ensureCaptionFonts(opts.style.captions);
 	const bg: Background =
 		opts.opaque && opts.background.kind === 'none' ? { kind: 'color', color: '#ffffff' } : opts.background;
 	drawBackground(ctx, layout.width, layout.height, bg);
@@ -267,20 +303,22 @@ export async function renderFull(
 		const it = items[i];
 		if (!it) continue;
 		const bmp = await decode(images[i].file);
-		drawImage(ctx, it, bmp);
+		drawImage(ctx, it, bmp, borderInset(opts.style, 1));
 		bmp.close();
 	}
 	drawBorders(ctx, items, opts.style);
 	drawLines(ctx, layout, opts.style);
+	drawCaptions(ctx, layout.cells, images, opts.style.captions, 1);
 	return canvas;
 }
 
-export function canvasToBlob(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob> {
+/** `quality` (0 to 1) applies to JPG and WebP. */
+export function canvasToBlob(canvas: HTMLCanvasElement, format: ExportFormat, quality = 0.92): Promise<Blob> {
 	return new Promise((resolve, reject) =>
 		canvas.toBlob(
 			(b) => (b ? resolve(b) : reject(new Error('The image was too large to export.'))),
 			`image/${format}`,
-			format === 'jpeg' ? 0.92 : undefined
+			format === 'png' ? undefined : quality
 		)
 	);
 }

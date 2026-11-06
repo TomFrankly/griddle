@@ -1,17 +1,29 @@
 export type Rect = { x: number; y: number; w: number; h: number };
 
+export type Span = { w: number; h: number };
+
+/** Where a cell sits in grid units. `c` can be fractional when a short last row is centered. */
+export type Slot = { c: number; r: number; w: number; h: number };
+
 export type LayoutInput = {
 	count: number;
+	/** How many columns and rows each image covers; missing entries are 1 × 1. */
+	spans?: Span[];
 	cols: number;
 	rows: number;
-	/** Cell width divided by cell height. */
+	/** Cell width divided by cell height. 0 stretches cells to fill `frame`. */
 	aspect: number;
-	/** Length in pixels of the output's longer side. */
+	/** Length in pixels of the output's longer side (ignored when `frame` is set). */
 	longEdge: number;
+	/** A fixed output size; the grid is fitted and centered inside it. */
+	frame?: { w: number; h: number } | null;
 	/** Space between cells, in output pixels. */
 	gutter: number;
 	/** Space around the outside of the grid, in output pixels. */
 	padding: number;
+	/** Space reserved above and below every row of images, for captions. */
+	bandAbove?: number;
+	bandBelow?: number;
 };
 
 export type Layout = {
@@ -19,57 +31,147 @@ export type Layout = {
 	height: number;
 	cols: number;
 	rows: number;
-	/** How many images are placed (extra images beyond cols × rows are left out). */
+	/** How many images are placed (images that don't fit in cols × rows are left out). */
 	used: number;
+	/** The image area of each placed cell, in output pixels. */
 	cells: Rect[];
+	slots: Slot[];
+	bandAbove: number;
+	bandBelow: number;
+	gutter: number;
 };
 
 const clampInt = (n: number, min: number, max: number) =>
 	Math.min(max, Math.max(min, Math.round(Number.isFinite(n) ? n : min)));
+const nonNeg = (n: number | undefined) => Math.max(0, Number.isFinite(n) ? (n as number) : 0);
+
+const spanOf = (spans: Span[] | undefined, i: number, cols: number, rows: number): Span => ({
+	w: clampInt(spans?.[i]?.w ?? 1, 1, cols),
+	h: clampInt(spans?.[i]?.h ?? 1, 1, rows)
+});
 
 /**
- * Lays out `count` equal cells in a grid of at most `cols` × `rows`.
- * Rows with no images are dropped, and a partly filled last row is centered.
+ * Places `count` cells on a grid of `cols` × `maxRows` units. With only 1 × 1 cells, a partly
+ * filled last row is centered. With larger cells, each goes in the first free spot that fits
+ * (row by row), so smaller cells fill the holes; placing stops at the first cell that doesn't fit.
+ */
+export function placeSlots(count: number, spans: Span[] | undefined, cols: number, maxRows: number): Slot[] {
+	const n = Math.max(0, Math.floor(count));
+	const sized = Array.from({ length: n }, (_, i) => spanOf(spans, i, cols, maxRows));
+	if (sized.every((s) => s.w === 1 && s.h === 1)) {
+		const used = Math.min(n, cols * maxRows);
+		const rows = Math.ceil(used / cols);
+		return Array.from({ length: used }, (_, i) => {
+			const r = Math.floor(i / cols);
+			const inRow = r === rows - 1 ? used - r * cols : cols;
+			return { c: (cols - inRow) / 2 + (i % cols), r, w: 1, h: 1 };
+		});
+	}
+	const taken: boolean[][] = Array.from({ length: maxRows }, () => Array(cols).fill(false));
+	const fits = (c: number, r: number, s: Span) => {
+		if (c + s.w > cols || r + s.h > maxRows) return false;
+		for (let y = r; y < r + s.h; y++) for (let x = c; x < c + s.w; x++) if (taken[y][x]) return false;
+		return true;
+	};
+	const out: Slot[] = [];
+	for (const s of sized) {
+		let spot: Slot | null = null;
+		for (let r = 0; r < maxRows && !spot; r++)
+			for (let c = 0; c < cols && !spot; c++) if (fits(c, r, s)) spot = { c, r, w: s.w, h: s.h };
+		if (!spot) break;
+		for (let y = spot.r; y < spot.r + s.h; y++) for (let x = spot.c; x < spot.c + s.w; x++) taken[y][x] = true;
+		out.push(spot);
+	}
+	return out;
+}
+
+/**
+ * Lays out equal grid cells (some may span several) at most `cols` × `rows`.
+ * Rows with no images are dropped, and a partly filled last row of single cells is centered.
  */
 export function computeLayout(input: LayoutInput): Layout {
 	const cols = clampInt(input.cols, 1, 100);
 	const maxRows = clampInt(input.rows, 1, 100);
-	const used = Math.min(Math.max(0, Math.floor(input.count)), cols * maxRows);
-	const rows = Math.max(1, Math.ceil(used / cols));
-	const aspect = input.aspect > 0 && Number.isFinite(input.aspect) ? input.aspect : 1;
-	const longEdge = clampInt(input.longEdge, 16, 20000);
-	const gutter = Math.max(0, Number.isFinite(input.gutter) ? input.gutter : 0);
-	const edge = Math.max(0, Number.isFinite(input.padding) ? input.padding : 0);
+	const slots = placeSlots(input.count, input.spans, cols, maxRows);
+	const used = slots.length;
+	const rows = Math.max(1, ...slots.map((s) => s.r + s.h));
+	const frame = input.frame && input.frame.w > 0 && input.frame.h > 0 ? input.frame : null;
+	const stretch = !(input.aspect > 0 && Number.isFinite(input.aspect));
+	const aspect = stretch ? 1 : input.aspect;
+	const gutter = nonNeg(input.gutter);
+	const edge = nonNeg(input.padding);
+	const bandAbove = nonNeg(input.bandAbove);
+	const bandBelow = nonNeg(input.bandBelow);
+	const bands = bandAbove + bandBelow;
 
-	// Decide which side is longer from the cells alone, then solve for the cell size.
-	const landscape = cols * aspect >= rows;
 	let cellW: number;
 	let cellH: number;
-	if (landscape) {
-		cellW = Math.max(1, (longEdge - 2 * edge - (cols - 1) * gutter) / cols);
-		cellH = cellW / aspect;
+	let width: number;
+	let height: number;
+	if (frame) {
+		width = clampInt(frame.w, 16, 20000);
+		height = clampInt(frame.h, 16, 20000);
+		const availW = Math.max(cols, width - 2 * edge - (cols - 1) * gutter) / cols;
+		const availH = Math.max(rows, height - 2 * edge - (rows - 1) * gutter - rows * bands) / rows;
+		if (stretch) {
+			cellW = availW;
+			cellH = availH;
+		} else {
+			cellW = Math.min(availW, availH * aspect);
+			cellH = cellW / aspect;
+		}
 	} else {
-		cellH = Math.max(1, (longEdge - 2 * edge - (rows - 1) * gutter) / rows);
-		cellW = cellH * aspect;
+		const longEdge = clampInt(input.longEdge, 16, 20000);
+		// Decide which side is longer from the cells alone, then solve for the cell size.
+		if (cols * aspect >= rows * (1 + bands / Math.max(1, longEdge / rows))) {
+			cellW = Math.max(1, (longEdge - 2 * edge - (cols - 1) * gutter) / cols);
+			cellH = cellW / aspect;
+		} else {
+			cellH = Math.max(1, (longEdge - 2 * edge - (rows - 1) * gutter - rows * bands) / rows);
+			cellW = cellH * aspect;
+		}
+		width = Math.round(2 * edge + cols * cellW + (cols - 1) * gutter);
+		height = Math.round(2 * edge + rows * (cellH + bands) + (rows - 1) * gutter);
 	}
 
-	const width = Math.round(2 * edge + cols * cellW + (cols - 1) * gutter);
-	const height = Math.round(2 * edge + rows * cellH + (rows - 1) * gutter);
-
-	const cells: Rect[] = [];
-	for (let i = 0; i < used; i++) {
-		const row = Math.floor(i / cols);
-		const col = i % cols;
-		const inRow = row === rows - 1 ? used - row * cols : cols;
-		const offset = ((cols - inRow) * (cellW + gutter)) / 2;
-		const x0 = edge + offset + col * (cellW + gutter);
-		const y0 = edge + row * (cellH + gutter);
+	const gridW = cols * cellW + (cols - 1) * gutter;
+	const gridH = rows * (cellH + bands) + (rows - 1) * gutter;
+	const offX = (width - gridW) / 2;
+	const offY = (height - gridH) / 2;
+	const cells = slots.map((s) => {
+		const x0 = offX + s.c * (cellW + gutter);
+		const y0 = offY + s.r * (cellH + bands + gutter) + bandAbove;
+		const x1 = x0 + s.w * cellW + (s.w - 1) * gutter;
+		const y1 = y0 + s.h * cellH + (s.h - 1) * (gutter + bands);
 		const x = Math.round(x0);
 		const y = Math.round(y0);
-		cells.push({ x, y, w: Math.round(x0 + cellW) - x, h: Math.round(y0 + cellH) - y });
-	}
+		return { x, y, w: Math.round(x1) - x, h: Math.round(y1) - y };
+	});
 
-	return { width, height, cols, rows, used, cells };
+	return { width, height, cols, rows, used, cells, slots, bandAbove, bandBelow, gutter };
+}
+
+/**
+ * Picks columns and rows for the given cells: enough room for all of them, with the grid's shape
+ * close to `target` (width / height) and few empty spots.
+ */
+export function autoGrid(spans: Span[], aspect: number, target = 1): { cols: number; rows: number } {
+	const n = spans.length;
+	if (!n) return { cols: 1, rows: 1 };
+	const a = aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
+	const area = spans.reduce((t, s) => t + Math.max(1, s.w) * Math.max(1, s.h), 0);
+	const minCols = Math.max(1, ...spans.map((s) => s.w));
+	let best = { cols: 1, rows: n, score: Infinity };
+	for (let cols = minCols; cols <= Math.max(minCols, Math.min(12, area)); cols++) {
+		let rows = Math.max(1, Math.ceil(area / cols), ...spans.map((s) => s.h));
+		while (rows < 100 && placeSlots(n, spans, cols, rows).length < n) rows++;
+		const filled = Math.max(...placeSlots(n, spans, cols, rows).map((s) => s.r + s.h));
+		const empty = cols * filled - area;
+		// Ties go to the wider grid.
+		const score = Math.abs(Math.log((cols * a) / filled / target)) + (0.6 * empty) / cols + (cols * a < filled ? 0.01 : 0);
+		if (score < best.score - 1e-9) best = { cols, rows: filled, score };
+	}
+	return { cols: best.cols, rows: best.rows };
 }
 
 export type Adjust = {
