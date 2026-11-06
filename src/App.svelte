@@ -521,7 +521,8 @@
 		if (!ok.length) return;
 		const next = [...images];
 		ok.forEach((img, j) => {
-			if (index + j < next.length) next[index + j] = img;
+			// The new image takes over the cell's size in the layout.
+			if (index + j < next.length) next[index + j] = { ...img, span: { ...next[index + j].span } };
 			else next.push(img);
 		});
 		images = next;
