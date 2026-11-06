@@ -31,6 +31,8 @@
 	import WandIcon from '@lucide/svelte/icons/wand-sparkles';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
+	import Undo2Icon from '@lucide/svelte/icons/undo-2';
+	import Redo2Icon from '@lucide/svelte/icons/redo-2';
 	import { computeLayout } from '$lib/grid';
 	import {
 		canvasToBlob,
@@ -153,6 +155,148 @@
 	});
 
 	let showingExamples = $state(false);
+	let welcomeDismissed = $state(false);
+
+	// Undo and redo. Each entry is a snapshot of the composition; images are referenced by id and
+	// kept decoded in `pool` until no snapshot uses them.
+	type Snapshot = {
+		images: { id: string; adjust: GridImage['adjust'] }[];
+		cols: number;
+		rows: number;
+		aspect: string;
+		fit: FitMode;
+		gap: number;
+		padding: number;
+		bgId: string;
+		customColor: string;
+		style: CellStyle;
+		size: string;
+		customSize: number;
+		showingExamples: boolean;
+	};
+	const HISTORY_MAX = 100;
+	const pool = new Map<string, GridImage>();
+	let past = $state.raw<Snapshot[]>([]);
+	let future = $state.raw<Snapshot[]>([]);
+	let current: { snap: Snapshot; key: string } | null = null;
+	let pending: ReturnType<typeof setTimeout> | undefined;
+
+	function capture(): Snapshot {
+		return {
+			images: images.map((i) => ({ id: i.id, adjust: { zoom: i.adjust.zoom, ox: i.adjust.ox, oy: i.adjust.oy } })),
+			cols,
+			rows,
+			aspect,
+			fit,
+			gap,
+			padding,
+			bgId,
+			customColor,
+			style: $state.snapshot(style),
+			size,
+			customSize,
+			showingExamples
+		};
+	}
+
+	function commit(snap: Snapshot) {
+		const key = JSON.stringify(snap);
+		if (current?.key === key) return;
+		if (current) past = [...past, current.snap].slice(-HISTORY_MAX);
+		current = { snap, key };
+		future = [];
+		prune();
+	}
+
+	function flush() {
+		if (pending === undefined) return;
+		clearTimeout(pending);
+		pending = undefined;
+		commit(capture());
+	}
+
+	function resetHistory() {
+		clearTimeout(pending);
+		pending = undefined;
+		const snap = capture();
+		current = { snap, key: JSON.stringify(snap) };
+		past = [];
+		future = [];
+		prune();
+	}
+
+	// Record changes once they settle, so a slider drag or a zoom gesture is one step.
+	$effect(() => {
+		const snap = capture();
+		clearTimeout(pending);
+		pending = setTimeout(() => {
+			pending = undefined;
+			commit(snap);
+		}, 350);
+	});
+
+	function restore(snap: Snapshot) {
+		images = snap.images.flatMap(({ id, adjust }) => {
+			const img = pool.get(id);
+			return img ? [{ ...img, adjust: { ...adjust } }] : [];
+		});
+		cols = snap.cols;
+		rows = snap.rows;
+		aspect = snap.aspect;
+		fit = snap.fit;
+		gap = snap.gap;
+		padding = snap.padding;
+		bgId = snap.bgId === 'image' && !bgImage ? 'white' : snap.bgId;
+		customColor = snap.customColor;
+		style = structuredClone(snap.style);
+		size = snap.size;
+		customSize = snap.customSize;
+		showingExamples = snap.showingExamples;
+		current = { snap, key: JSON.stringify(snap) };
+	}
+
+	function undo() {
+		flush();
+		const prev = past.at(-1);
+		if (!prev || !current) return;
+		past = past.slice(0, -1);
+		future = [...future, current.snap];
+		restore(prev);
+	}
+
+	function redo() {
+		flush();
+		const next = future.at(-1);
+		if (!next || !current) return;
+		future = future.slice(0, -1);
+		past = [...past, current.snap];
+		restore(next);
+	}
+
+	function prune() {
+		const keep = new Set(images.map((i) => i.id));
+		for (const snap of [...past, ...future, current?.snap]) snap?.images.forEach((i) => keep.add(i.id));
+		for (const [id, img] of pool) {
+			if (!keep.has(id)) {
+				release(img);
+				pool.delete(id);
+			}
+		}
+	}
+
+	function onKeydown(e: KeyboardEvent) {
+		if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+		const t = e.target as HTMLElement | null;
+		if (t?.closest('input, textarea, [contenteditable="true"]')) return;
+		const key = e.key.toLowerCase();
+		if (key === 'z' && !e.shiftKey) undo();
+		else if ((key === 'z' && e.shiftKey) || (key === 'y' && e.ctrlKey && !e.metaKey)) redo();
+		else return;
+		e.preventDefault();
+	}
+
+	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+	const mod = isMac ? '⌘' : 'Ctrl+';
 
 	async function addFiles(list: FileList | File[] | null | undefined, examples = false) {
 		const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
@@ -162,18 +306,41 @@
 			clearAll();
 			showingExamples = false;
 		}
+		const ok = await loadAll(files);
+		images = [...images, ...ok];
+		if (examples) showingExamples = ok.length > 0;
+	}
+
+	async function loadAll(files: File[]) {
 		loading += files.length;
 		const results = await Promise.allSettled(files.map(loadImage));
 		loading -= files.length;
 		const ok: GridImage[] = [];
 		let failed = 0;
 		for (const r of results) {
-			if (r.status === 'fulfilled') ok.push(r.value);
-			else failed++;
+			if (r.status === 'fulfilled') {
+				ok.push(r.value);
+				pool.set(r.value.id, r.value);
+			} else failed++;
 		}
-		images = [...images, ...ok];
-		if (examples) showingExamples = ok.length > 0;
 		if (failed) toast.error(`${failed} file${failed > 1 ? 's' : ''} couldn't be read`);
+		return ok;
+	}
+
+	/** Puts dropped images into the grid starting at cell `index`, replacing what is there. */
+	async function replaceAt(index: number, list: FileList | File[] | null | undefined) {
+		dragDepth = 0;
+		const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
+		if (!files.length) return;
+		const ok = await loadAll(files);
+		if (!ok.length) return;
+		const next = [...images];
+		ok.forEach((img, j) => {
+			if (index + j < next.length) next[index + j] = img;
+			else next.push(img);
+		});
+		images = next;
+		showingExamples = false;
 	}
 
 	async function setBackgroundImage(file: File | undefined) {
@@ -195,13 +362,11 @@
 		img.thumb.close();
 		URL.revokeObjectURL(img.thumbUrl);
 	}
+	// Removed images stay decoded until history no longer refers to them (see prune).
 	function remove(id: string) {
-		const img = images.find((i) => i.id === id);
-		if (img) release(img);
 		images = images.filter((i) => i.id !== id);
 	}
 	function clearAll() {
-		images.forEach(release);
 		images = [];
 		showingExamples = false;
 	}
@@ -302,10 +467,14 @@
 		if (files.length) addFiles(files);
 	}
 
-	onDestroy(() => images.forEach(release));
+	onDestroy(() => {
+		clearTimeout(pending);
+		pool.forEach(release);
+	});
 
 	onMount(async () => {
-		if (!images.length) addFiles(await exampleFiles(), true);
+		if (!images.length) await addFiles(await exampleFiles(), true);
+		resetHistory();
 	});
 
 	const labelOf = (list: { value: string; label: string }[], v: string) => list.find((x) => x.value === v)?.label ?? v;
@@ -315,7 +484,7 @@
 	};
 </script>
 
-<svelte:window ondragenter={onDragEnter} ondragleave={onDragLeave} ondragover={onDragOver} ondrop={onDrop} onpaste={onPaste} />
+<svelte:window ondragenter={onDragEnter} ondragleave={onDragLeave} ondragover={onDragOver} ondrop={onDrop} onpaste={onPaste} onkeydown={onKeydown} />
 
 <ModeWatcher />
 <Toaster position="bottom-center" />
@@ -391,6 +560,10 @@
 				<span class="font-logo text-[22px] leading-none italic">Griddle</span>
 			</div>
 			<div class="ml-auto flex items-center gap-1.5">
+				<div class="flex items-center">
+					{@render iconAction(`Undo (${mod}Z)`, Undo2Icon, undo, !past.length)}
+					{@render iconAction(isMac ? 'Redo (⇧⌘Z)' : 'Redo (Ctrl+Y)', Redo2Icon, redo, !future.length)}
+				</div>
 				<DropdownMenu.Root>
 					<DropdownMenu.Trigger>
 						{#snippet child({ props })}
@@ -627,6 +800,18 @@
 			</aside>
 
 			<main class="flex min-w-0 flex-col md:min-h-0 md:flex-1">
+				{#if showingExamples && !welcomeDismissed}
+					<div class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2.5" data-testid="welcome">
+						<p class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm">
+							<span class="font-medium">Welcome to <span class="font-logo text-lg leading-none italic">Griddle!</span></span>
+							<span class="text-muted-foreground">Drag in images to replace these samples, or start from scratch.</span>
+						</p>
+						<div class="flex items-center gap-1">
+							<Button size="sm" variant="outline" onclick={clearAll} data-testid="start-scratch">Start from scratch</Button>
+							{@render iconAction('Dismiss', XIcon, () => (welcomeDismissed = true))}
+						</div>
+					</div>
+				{/if}
 				<div
 					bind:clientWidth={stageW}
 					bind:clientHeight={stageH}
@@ -642,6 +827,7 @@
 										image={images[i]}
 										{fit}
 										index={i}
+										onfiles={(files) => replaceAt(i, files)}
 										radius={style.corners.on ? (style.corners.radius / 100) * (Math.min(rect.w, rect.h) / 2) : 0}
 									/>
 								{/if}
@@ -664,8 +850,12 @@
 						</div>
 					{/if}
 					{#if dragDepth > 0}
-						<div class="bg-background/80 border-primary pointer-events-none absolute inset-2 flex items-center justify-center border-2">
-							<span class="text-sm font-medium">Drop to add</span>
+						<div
+							class="border-primary pointer-events-none absolute inset-2 flex justify-center border-2 {images.length ? 'items-start' : 'bg-background/80 items-center'}"
+						>
+							<span class="bg-primary text-primary-foreground px-2.5 py-1 text-xs font-medium">
+								{images.length ? 'Drop on an image to replace it, or anywhere else to add' : 'Drop to add'}
+							</span>
 						</div>
 					{/if}
 				</div>

@@ -1,6 +1,7 @@
 <!--
   Sits over one grid cell in the preview: drag to move the image inside its cell, scroll or use
-  the slider to zoom, and reset to the default size and position.
+  the slider to zoom, and reset to the default size and position. Dropping image files on it
+  replaces the image.
 -->
 <script lang="ts">
 	import { Slider } from '$lib/components/ui/slider/index.js';
@@ -13,10 +14,41 @@
 		image,
 		fit,
 		index,
-		radius = 0
-	}: { rect: Rect; image: GridImage; fit: FitMode; index: number; radius?: number } = $props();
+		radius = 0,
+		onfiles
+	}: {
+		rect: Rect;
+		image: GridImage;
+		fit: FitMode;
+		index: number;
+		radius?: number;
+		onfiles?: (files: FileList) => void;
+	} = $props();
 
 	let dragging = $state(false);
+	let fileOver = $state(0);
+	const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
+	function onDragEnter(e: DragEvent) {
+		if (!onfiles || !hasFiles(e)) return;
+		e.preventDefault();
+		fileOver++;
+	}
+	function onDragOver(e: DragEvent) {
+		if (!onfiles || !hasFiles(e)) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+	}
+	function onDragLeave(e: DragEvent) {
+		if (hasFiles(e)) fileOver = Math.max(0, fileOver - 1);
+	}
+	function onDrop(e: DragEvent) {
+		fileOver = 0;
+		if (!onfiles || !hasFiles(e) || !e.dataTransfer?.files.length) return;
+		e.preventDefault();
+		e.stopPropagation();
+		onfiles(e.dataTransfer.files);
+	}
 	const place = $derived(placeImage(image.width, image.height, rect, fit, image.adjust));
 	const movable = $derived(place.slackX > 0.5 || place.slackY > 0.5);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
@@ -89,7 +121,20 @@
 	onpointerdown={onPointerDown}
 	onwheel={onWheel}
 	onkeydown={onKey}
+	ondragenter={onDragEnter}
+	ondragover={onDragOver}
+	ondragleave={onDragLeave}
+	ondrop={onDrop}
 >
+	{#if fileOver > 0}
+		<div
+			class="bg-primary/25 ring-primary pointer-events-none absolute inset-0 z-10 flex items-center justify-center ring-2 ring-inset"
+			style:border-radius="{radius}px"
+			data-testid="cell-drop"
+		>
+			<span class="bg-primary text-primary-foreground px-2 py-0.5 text-xs font-medium">Replace</span>
+		</div>
+	{/if}
 	<div
 		class="pointer-events-none absolute inset-0 opacity-0 ring-1 ring-white/70 ring-inset transition-opacity group-hover/cell:opacity-100"
 		style:border-radius="{radius}px"

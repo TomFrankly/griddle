@@ -5,6 +5,9 @@ Make a grid of images! Drop in any number of images and get one grid image back.
 - Columns and rows, with a partly filled last row centered
 - Cell shapes: square, 4:3, 3:2, 16:9, 5:4, 21:9 and their portrait versions
 - Fill (crop) or fit; drag an image in the preview to move it, hover for a zoom slider and reset
+- Drop an image on a cell to replace it
+- Rounded corners, borders, drop shadows and divider lines
+- Undo and redo (Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z or Ctrl+Y)
 - Gap and edge padding
 - Backgrounds: transparent, white, black, any color, gradient and dot-grid presets, or your own image
 - Output size presets (long edge) or a custom size
@@ -48,4 +51,4 @@ npm run deploy
 
 ## License
 
-MIT
+MIT. The dark theme is based on [Vesper](https://github.com/raunofreiberg/vesper) by Rauno Freiberg (MIT).
