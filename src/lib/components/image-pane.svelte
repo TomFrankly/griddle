@@ -10,8 +10,8 @@
 	import ClipboardPasteIcon from '@lucide/svelte/icons/clipboard-paste';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw-square';
 	import RotateCwIcon from '@lucide/svelte/icons/rotate-cw-square';
-	import FlipHorizontalIcon from '@lucide/svelte/icons/flip-horizontal-2';
-	import FlipVerticalIcon from '@lucide/svelte/icons/flip-vertical-2';
+	import FlipHorizontalIcon from '@lucide/svelte/icons/flip-vertical-2';
+	import FlipVerticalIcon from '@lucide/svelte/icons/flip-horizontal-2';
 	import SliderField from './slider-field.svelte';
 	import InfoTip from './info-tip.svelte';
 	import { CELL_SETTINGS, RESET_FRAMING, sharedValue, type CellChange, type CellSetting } from '$lib/cell-edits';

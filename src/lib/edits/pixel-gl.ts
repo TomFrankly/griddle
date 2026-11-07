@@ -14,7 +14,8 @@ const uniformType = (p: Param) => (p.kind === 'color' ? 'vec3' : 'float');
 const VERT = `#version 300 es
 in vec2 a;
 out vec2 uv;
-void main() { uv = a * .5 + .5; gl_Position = vec4(a, 0., 1.); }`;
+// Texture rows run top-down (no unpack flip, which ImageBitmaps ignore), so v counts from the top.
+void main() { uv = vec2(a.x * .5 + .5, .5 - a.y * .5); gl_Position = vec4(a, 0., 1.); }`;
 
 export const FRAG = `#version 300 es
 precision highp float;
@@ -117,7 +118,7 @@ export function applyPixels(
 	g.canvas.height = h;
 	gl.viewport(0, 0, w, h);
 	gl.bindTexture(gl.TEXTURE_2D, g.tex);
-	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 	gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
 	gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, input);
