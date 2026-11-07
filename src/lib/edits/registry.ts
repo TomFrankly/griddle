@@ -46,8 +46,11 @@ export type ChoiceParam = ParamBase & {
 	initial: string;
 };
 export type ColorParam = ParamBase & { kind: 'color'; initial: string };
+/** A tone curve, stored as text (see curves.ts). The pixel pass reads it from a lookup texture
+ * whose channel is `lut`: 0 red, 1 green, 2 blue, 3 all three. */
+export type CurveParam = ParamBase & { kind: 'curve'; initial: string; lut: 0 | 1 | 2 | 3 };
 
-export type Param = NumberParam | ToggleParam | ChoiceParam | ColorParam;
+export type Param = NumberParam | ToggleParam | ChoiceParam | ColorParam | CurveParam;
 
 /**
  * Where an operation runs:
@@ -83,6 +86,8 @@ export const GROUP_LABELS: Record<OperationGroup, string> = {
 	looks: 'Looks',
 	effects: 'Effects'
 };
+
+import { IDENTITY_CURVE } from './curves';
 
 const num = (id: string, label: string, min: number, max: number, extra: Partial<NumberParam> = {}): NumberParam => ({
 	kind: 'number',
@@ -193,6 +198,25 @@ export const OPERATIONS: Operation[] = [
   vec3 a = pow(x * 2., vec3(g)) * .5;
   vec3 b = 1. - pow((1. - x) * 2., vec3(g)) * .5;
   c = mix(a, b, step(.5, x));
+}`
+	},
+	{
+		id: 'curves',
+		label: 'Curves',
+		group: 'light',
+		stage: 'pixel',
+		params: [
+			{ kind: 'curve', id: 'curve', label: 'RGB', initial: IDENTITY_CURVE, lut: 3 },
+			{ kind: 'curve', id: 'curveR', label: 'Red', initial: IDENTITY_CURVE, lut: 0 },
+			{ kind: 'curve', id: 'curveG', label: 'Green', initial: IDENTITY_CURVE, lut: 1 },
+			{ kind: 'curve', id: 'curveB', label: 'Blue', initial: IDENTITY_CURVE, lut: 2 }
+		],
+		// Each channel through its own curve, then all three through the RGB curve.
+		glsl: `if (curvesOn > .5) {
+  vec3 x = clamp(c, 0., 1.) * (255. / 256.) + .5 / 256.;
+  c = vec3(texture(curveLut, vec2(x.r, .5)).r, texture(curveLut, vec2(x.g, .5)).g, texture(curveLut, vec2(x.b, .5)).b);
+  x = clamp(c, 0., 1.) * (255. / 256.) + .5 / 256.;
+  c = vec3(texture(curveLut, vec2(x.r, .5)).a, texture(curveLut, vec2(x.g, .5)).a, texture(curveLut, vec2(x.b, .5)).a);
 }`
 	},
 	{

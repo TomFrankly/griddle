@@ -15,6 +15,8 @@
 	import SliderField from './slider-field.svelte';
 	import InfoTip from './info-tip.svelte';
 	import EditParam from './edit-param.svelte';
+	import CurveEditor from './curve-editor.svelte';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { slide } from 'svelte/transition';
 	import { CELL_SETTINGS, RESET_FRAMING, sharedValue, type CellChange, type CellSetting } from '$lib/cell-edits';
 	import type { Adjust } from '$lib/grid';
@@ -27,6 +29,7 @@
 		paramById,
 		type ImageEdits,
 		type NumberParam,
+		type CurveParam,
 		type OperationGroup,
 		type ParamValue
 	} from '$lib/edits';
@@ -87,6 +90,7 @@
 	// show a control for each parameter, and operations with an on switch show the rest of their
 	// parameters only while it is on.
 	const EDIT_GROUPS: OperationGroup[] = ['light', 'color', 'looks', 'effects'];
+	let curvesOpen = $state(false);
 	const set = (id: string, value: ParamValue) => onedit({ kind: 'edit', values: { [id]: value } });
 	const angle = paramById('angle') as NumberParam;
 	const angleBinding = editBinding(angle);
@@ -202,7 +206,25 @@
 				<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!groupChanged(g)} onclick={() => resetGroup(g)}>Reset</Button>
 			</div>
 			{#each OPERATIONS.filter((op) => op.group === g) as op (op.id)}
-				{#if op.enabledBy}
+				{#if op.params.every((p) => p.kind === 'curve')}
+					<div>
+						<button
+							type="button"
+							class="flex min-h-8 w-full items-center justify-between text-sm"
+							aria-expanded={curvesOpen}
+							onclick={() => (curvesOpen = !curvesOpen)}
+							data-testid="curves-toggle"
+						>
+							{op.label}
+							<ChevronDownIcon class="text-muted-foreground size-4 transition-transform {curvesOpen ? 'rotate-180' : ''}" />
+						</button>
+						{#if curvesOpen}
+							<div class="pt-1 pb-2" transition:slide={{ duration: 150 }}>
+								<CurveEditor params={op.params as CurveParam[]} {edits} onset={set} />
+							</div>
+						{/if}
+					</div>
+				{:else if op.enabledBy}
 					{@const toggle = op.params.find((p) => p.id === op.enabledBy)!}
 					<EditParam param={toggle} {edits} onset={set} />
 					{#if edits.some((e) => valueOf(e, toggle.id) !== toggle.initial)}

@@ -2,6 +2,7 @@
  * An image's edits: the value of each parameter from the registry that differs from its initial
  * value. Leaving initial values out keeps stored edits small and makes "no edits" an empty object.
  */
+import { formatCurve, parseCurve } from './curves';
 import { OPERATIONS, PARAMS, bulkMode, paramById, operationOf, type OperationGroup, type Param, type ParamValue } from './registry';
 
 export type ImageEdits = Record<string, ParamValue>;
@@ -38,6 +39,10 @@ export function coerce(p: Param, v: unknown): ParamValue | undefined {
 		}
 		case 'color':
 			return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined;
+		case 'curve': {
+			const pts = parseCurve(v);
+			return pts ? formatCurve(pts) : undefined;
+		}
 	}
 }
 

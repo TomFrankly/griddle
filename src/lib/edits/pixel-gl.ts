@@ -3,11 +3,15 @@
  * the operations' GLSL, in registry order; an operation at its initial values leaves pixels as
  * they are, and the pass is skipped entirely when no pixel operation is in use.
  */
-import { OPERATIONS, type Param } from './registry';
+import { OPERATIONS, type CurveParam, type Param } from './registry';
 import { valueOf, stageActive, type ImageEdits } from './edits';
+import { IDENTITY_CURVE, parseCurve, sampleCurve } from './curves';
 
 const PIXEL_OPS = OPERATIONS.filter((op) => op.stage === 'pixel' && op.glsl);
-const UNIFORMS: Param[] = PIXEL_OPS.flatMap((op) => op.params);
+const ALL: Param[] = PIXEL_OPS.flatMap((op) => op.params);
+/** Curves go to the shader as one lookup texture; every other parameter is a uniform. */
+const CURVES = ALL.filter((p): p is CurveParam => p.kind === 'curve');
+const UNIFORMS = ALL.filter((p) => p.kind !== 'curve');
 
 const uniformType = (p: Param) => (p.kind === 'color' ? 'vec3' : 'float');
 
@@ -21,6 +25,8 @@ export const FRAG = `#version 300 es
 precision highp float;
 in vec2 uv;
 uniform sampler2D img;
+uniform sampler2D curveLut;
+uniform float curvesOn;
 ${UNIFORMS.map((p) => `uniform ${uniformType(p)} u_${p.id};`).join('\n')}
 out vec4 o;
 const vec3 LUMA = vec3(.2126, .7152, .0722);
@@ -45,7 +51,10 @@ type Gl = {
 	canvas: HTMLCanvasElement;
 	loc: Map<string, WebGLUniformLocation | null>;
 	aspect: WebGLUniformLocation | null;
+	curvesOn: WebGLUniformLocation | null;
 	tex: WebGLTexture;
+	lut: WebGLTexture;
+	lutKey: string;
 	maxSize: number;
 };
 let state: Gl | null | undefined;
@@ -83,10 +92,20 @@ function setup(): Gl | null {
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		gl.uniform1i(gl.getUniformLocation(prog, 'img'), 0);
+		gl.uniform1i(gl.getUniformLocation(prog, 'curveLut'), 1);
+		gl.activeTexture(gl.TEXTURE1);
+		const lut = gl.createTexture()!;
+		gl.bindTexture(gl.TEXTURE_2D, lut);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		gl.activeTexture(gl.TEXTURE0);
 		const loc = new Map(UNIFORMS.map((p) => [p.id, gl.getUniformLocation(prog, `u_${p.id}`)]));
 		const maxSize = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE) as number, ...(gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array));
 		canvas.addEventListener('webglcontextlost', () => (state = undefined));
-		return (state = { gl, canvas, loc, tex, maxSize, aspect: gl.getUniformLocation(prog, 'aspect') });
+		const curvesOn = gl.getUniformLocation(prog, 'curvesOn');
+		return (state = { gl, canvas, loc, tex, lut, lutKey: '', maxSize, aspect: gl.getUniformLocation(prog, 'aspect'), curvesOn });
 	} catch (e) {
 		console.warn('Image edits could not start WebGL:', e);
 		return (state = null);
@@ -95,6 +114,27 @@ function setup(): Gl | null {
 
 /** False when this browser can't run color edits. */
 export const pixelEditsAvailable = () => !!setup();
+
+/** Uploads the curves as a 256 × 1 lookup texture (red, green, blue, then the RGB curve in
+ * alpha), only when they changed since the last image. */
+function setCurves(g: Gl, edits: ImageEdits | undefined) {
+	const texts = CURVES.map((p) => String(valueOf(edits, p.id)));
+	const on = texts.some((t) => t !== IDENTITY_CURVE);
+	g.gl.uniform1f(g.curvesOn, on ? 1 : 0);
+	const key = texts.join('|');
+	if (!on || key === g.lutKey) return;
+	const data = new Uint8Array(256 * 4);
+	CURVES.forEach((p, i) => {
+		const s = sampleCurve(parseCurve(texts[i]) ?? [[0, 0], [1, 1]]);
+		for (let j = 0; j < 256; j++) data[j * 4 + p.lut] = Math.round(s[j] * 255);
+	});
+	const { gl } = g;
+	gl.activeTexture(gl.TEXTURE1);
+	gl.bindTexture(gl.TEXTURE_2D, g.lut);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+	gl.activeTexture(gl.TEXTURE0);
+	g.lutKey = key;
+}
 
 const hex3 = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number];
 
@@ -139,6 +179,7 @@ export function applyPixels(
 		else gl.uniform1f(l, typeof v === 'boolean' ? (v ? 1 : 0) : Number(v));
 	}
 	gl.uniform1f(g.aspect, h / w);
+	setCurves(g, edits);
 	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	const out = document.createElement('canvas');
 	out.width = w;

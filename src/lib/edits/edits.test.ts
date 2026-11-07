@@ -4,6 +4,7 @@ import type { ImageEdits } from './edits';
 import { editedSize, rotationCrop } from './geometry';
 import { OPERATIONS, PARAMS } from './registry';
 import { FRAG } from './pixel-gl';
+import { IDENTITY_CURVE, parseCurve, sampleCurve } from './curves';
 import { applyImageEdit, copySettings, pasteChanges } from '../cell-edits';
 
 describe('operations registry', () => {
@@ -14,7 +15,7 @@ describe('operations registry', () => {
 
 	it('builds one shader with a uniform for every pixel parameter', () => {
 		for (const op of OPERATIONS.filter((o) => o.stage === 'pixel'))
-			for (const p of op.params) expect(FRAG).toContain(`uniform ${p.kind === 'color' ? 'vec3' : 'float'} u_${p.id};`);
+			for (const p of op.params.filter((q) => q.kind !== 'curve')) expect(FRAG).toContain(`uniform ${p.kind === 'color' ? 'vec3' : 'float'} u_${p.id};`);
 		expect(FRAG).not.toContain('u_angle');
 	});
 });
@@ -90,5 +91,28 @@ describe('geometry', () => {
 		const t = (10 * Math.PI) / 180;
 		expect(s.width * Math.cos(t) + s.height * Math.sin(t)).toBeLessThanOrEqual(300 + 1e-9);
 		expect(s.width * Math.sin(t) + s.height * Math.cos(t)).toBeLessThanOrEqual(200 + 1e-9);
+	});
+});
+
+describe('curves', () => {
+	it('stores curves as sorted, deduplicated text', () => {
+		expect(withEdits({}, { curve: '1,1 0,0.1 0.5,0.6' })).toEqual({ curve: '0,0.1 0.5,0.6 1,1' });
+		expect(withEdits({}, { curve: '0,0 1,1' })).toEqual({});
+		expect(withEdits({}, { curve: 'nonsense' })).toEqual({});
+	});
+
+	it('samples a smooth line through every point without overshooting', () => {
+		const pts = parseCurve('0,0 0.25,0.1 0.5,0.5 1,1')!;
+		const s = sampleCurve(pts, 101);
+		expect(s[0]).toBeCloseTo(0);
+		expect(s[25]).toBeCloseTo(0.1, 2);
+		expect(s[50]).toBeCloseTo(0.5, 2);
+		expect(s[100]).toBeCloseTo(1);
+		for (let i = 1; i < s.length; i++) expect(s[i]).toBeGreaterThanOrEqual(s[i - 1] - 1e-6);
+	});
+
+	it('is a straight line for the identity curve', () => {
+		const s = sampleCurve(parseCurve(IDENTITY_CURVE)!, 11);
+		s.forEach((y, i) => expect(y).toBeCloseTo(i / 10));
 	});
 });
