@@ -14,6 +14,8 @@
 	import FlipVerticalIcon from '@lucide/svelte/icons/flip-horizontal-2';
 	import SliderField from './slider-field.svelte';
 	import InfoTip from './info-tip.svelte';
+	import EditParam from './edit-param.svelte';
+	import { slide } from 'svelte/transition';
 	import { CELL_SETTINGS, RESET_FRAMING, sharedValue, type CellChange, type CellSetting } from '$lib/cell-edits';
 	import type { Adjust } from '$lib/grid';
 	import {
@@ -25,7 +27,8 @@
 		paramById,
 		type ImageEdits,
 		type NumberParam,
-		type OperationGroup
+		type OperationGroup,
+		type ParamValue
 	} from '$lib/edits';
 
 	let {
@@ -74,10 +77,10 @@
 	const offCenter = $derived(adjusts.some((a) => a.ox !== 0 || a.oy !== 0));
 
 	// Image edits, one section per registry group. Geometry has its own buttons; other groups
-	// show a slider for each number parameter.
-	const SLIDER_GROUPS: OperationGroup[] = ['light', 'color'];
-	const sliders = (g: OperationGroup) =>
-		OPERATIONS.filter((op) => op.group === g).flatMap((op) => op.params.filter((p): p is NumberParam => p.kind === 'number'));
+	// show a control for each parameter, and operations with an on switch show the rest of their
+	// parameters only while it is on.
+	const EDIT_GROUPS: OperationGroup[] = ['light', 'color', 'looks', 'effects'];
+	const set = (id: string, value: ParamValue) => onedit({ kind: 'edit', values: { [id]: value } });
 	const angle = paramById('angle') as NumberParam;
 	const angleBinding = editBinding(angle);
 	function editBinding(p: NumberParam) {
@@ -161,19 +164,28 @@
 		</SliderField>
 	</section>
 
-	{#each SLIDER_GROUPS as g (g)}
+	{#each EDIT_GROUPS as g (g)}
 		<section class="pane-section space-y-2" data-testid="edit-{g}">
 			<div class="flex items-center justify-between">
 				<h2 class="pane-title">{GROUP_LABELS[g]}</h2>
 				<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!groupChanged(g)} onclick={() => resetGroup(g)}>Reset</Button>
 			</div>
-			{#each sliders(g) as p (p.id)}
-				{@const b = editBinding(p)}
-				<SliderField label={p.label} bind:value={b.get, b.set} min={p.min} max={p.max} step={p.step} unit={p.unit} mixed={mixedEdit(p.id)}>
-					{#snippet extra()}
-						{#if p.tip}<InfoTip text={p.tip} />{:else}<span class="w-4 shrink-0"></span>{/if}
-					{/snippet}
-				</SliderField>
+			{#each OPERATIONS.filter((op) => op.group === g) as op (op.id)}
+				{#if op.enabledBy}
+					{@const toggle = op.params.find((p) => p.id === op.enabledBy)!}
+					<EditParam param={toggle} {edits} onset={set} />
+					{#if edits.some((e) => valueOf(e, toggle.id) !== toggle.initial)}
+						<div class="space-y-2 border-l pl-3" transition:slide={{ duration: 150 }}>
+							{#each op.params.filter((p) => p !== toggle) as p (p.id)}
+								<EditParam param={p} {edits} onset={set} />
+							{/each}
+						</div>
+					{/if}
+				{:else}
+					{#each op.params as p (p.id)}
+						<EditParam param={p} {edits} onset={set} />
+					{/each}
+				{/if}
 			{/each}
 		</section>
 	{/each}

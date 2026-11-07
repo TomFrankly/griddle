@@ -14,7 +14,7 @@ describe('operations registry', () => {
 
 	it('builds one shader with a uniform for every pixel parameter', () => {
 		for (const op of OPERATIONS.filter((o) => o.stage === 'pixel'))
-			for (const p of op.params) expect(FRAG).toContain(`uniform float u_${p.id};`);
+			for (const p of op.params) expect(FRAG).toContain(`uniform ${p.kind === 'color' ? 'vec3' : 'float'} u_${p.id};`);
 		expect(FRAG).not.toContain('u_angle');
 	});
 });

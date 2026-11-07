@@ -26,6 +26,13 @@ out vec4 o;
 const vec3 LUMA = vec3(.2126, .7152, .0722);
 vec3 toLinear(vec3 c) { c = max(c, 0.); return mix(c / 12.92, pow((c + .055) / 1.055, vec3(2.4)), step(.04045, c)); }
 vec3 toSrgb(vec3 c) { c = max(c, 0.); return mix(c * 12.92, 1.055 * pow(c, vec3(1. / 2.4)) - .055, step(.0031308, c)); }
+vec3 softLight(vec3 b, vec3 s) { return mix(b - (1. - 2. * s) * b * (1. - b), b + (2. * s - 1.) * (sqrt(b) - b), step(.5, s)); }
+vec3 hueRotate(vec3 c, float a) {
+  const vec3 k = vec3(.57735);
+  float ca = cos(a);
+  return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1. - ca);
+}
+uniform float aspect;
 void main() {
   vec4 px = texture(img, uv);
   vec3 c = px.rgb;
@@ -37,6 +44,7 @@ type Gl = {
 	gl: WebGL2RenderingContext;
 	canvas: HTMLCanvasElement;
 	loc: Map<string, WebGLUniformLocation | null>;
+	aspect: WebGLUniformLocation | null;
 	tex: WebGLTexture;
 	maxSize: number;
 };
@@ -78,7 +86,7 @@ function setup(): Gl | null {
 		const loc = new Map(UNIFORMS.map((p) => [p.id, gl.getUniformLocation(prog, `u_${p.id}`)]));
 		const maxSize = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE) as number, ...(gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array));
 		canvas.addEventListener('webglcontextlost', () => (state = undefined));
-		return (state = { gl, canvas, loc, tex, maxSize });
+		return (state = { gl, canvas, loc, tex, maxSize, aspect: gl.getUniformLocation(prog, 'aspect') });
 	} catch (e) {
 		console.warn('Image edits could not start WebGL:', e);
 		return (state = null);
@@ -130,6 +138,7 @@ export function applyPixels(
 		else if (p.kind === 'choice') gl.uniform1f(l, Math.max(0, p.options.findIndex((o) => o.value === v)));
 		else gl.uniform1f(l, typeof v === 'boolean' ? (v ? 1 : 0) : Number(v));
 	}
+	gl.uniform1f(g.aspect, h / w);
 	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	const out = document.createElement('canvas');
 	out.width = w;
