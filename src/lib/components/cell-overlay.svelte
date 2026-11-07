@@ -23,8 +23,9 @@
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import ClipboardPasteIcon from '@lucide/svelte/icons/clipboard-paste';
 	import { minZoom, placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
-	import { applyChange, RESET_SETTINGS, type CellChange } from '$lib/cell-edits';
+	import { applyChange, RESET_FRAMING, type CellChange } from '$lib/cell-edits';
 	import type { FitMode, GridImage } from '$lib/render';
+	import { editedSize } from '$lib/edits';
 	import type { CaptionStyle } from '$lib/captions';
 
 	let {
@@ -159,15 +160,16 @@
 	}
 	const box = $derived(area ?? rect);
 	const NO_PLACE = { x: 0, y: 0, w: 0, h: 0, slackX: 1, slackY: 1, limitX: 0, limitY: 0 };
-	const place = $derived(empty ? NO_PLACE : placeImage(image.width, image.height, box, fit, image.adjust, free));
-	const zoomMin = $derived(empty ? 1 : Math.floor(minZoom(image.width, image.height, box, fit) * 100) / 100);
+	const size = $derived(editedSize(image.width, image.height, image.edits));
+	const place = $derived(empty ? NO_PLACE : placeImage(size.width, size.height, box, fit, image.adjust, free));
+	const zoomMin = $derived(empty ? 1 : Math.floor(minZoom(size.width, size.height, box, fit) * 100) / 100);
 	const movable = $derived(place.limitX > 0.001 || place.limitY > 0.001);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
 	// Hover controls are 28 px round; this keeps them inside the cell's rounded corners.
 	const controlInset = $derived(Math.max(6, Math.round((Math.min(radius, Math.min(rect.w, rect.h) / 2) - 14) * (1 - Math.SQRT1_2))));
 	function edit(change: CellChange) {
 		if (onedit) onedit(change);
-		else image.adjust = applyChange({ ...image, area: box }, change, { fit, free });
+		else image.adjust = applyChange({ ...image, ...size, area: box }, change, { fit, free });
 	}
 	const zoomBinding = {
 		get: () => image.adjust.zoom,
@@ -222,7 +224,7 @@
 	}
 
 	function reset() {
-		edit({ kind: 'set', values: RESET_SETTINGS });
+		edit({ kind: 'set', values: RESET_FRAMING });
 	}
 
 	function onKey(e: KeyboardEvent) {

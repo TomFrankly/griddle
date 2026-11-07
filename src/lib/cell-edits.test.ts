@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyChange, copySettings, RESET_SETTINGS, sharedValue, type EditTarget } from './cell-edits';
+import { applyChange, copySettings, RESET_FRAMING, sharedValue, type EditTarget } from './cell-edits';
 import { ZOOM_MAX } from './grid';
 
 const opts = { fit: 'fill' as const, free: false };
@@ -48,7 +48,7 @@ describe('sharedValue and copied settings', () => {
 	});
 
 	it('copies every setting and resets to the starting values', () => {
-		expect(copySettings({ zoom: 2, ox: 0.1, oy: -0.2 })).toEqual({ zoom: 2, ox: 0.1, oy: -0.2 });
-		expect(applyChange(wide({ zoom: 2, ox: 0.3, oy: 0 }), { kind: 'set', values: RESET_SETTINGS }, opts)).toEqual({ zoom: 1, ox: 0, oy: 0 });
+		expect(copySettings({ zoom: 2, ox: 0.1, oy: -0.2 }).framing).toEqual({ zoom: 2, ox: 0.1, oy: -0.2 });
+		expect(applyChange(wide({ zoom: 2, ox: 0.3, oy: 0 }), { kind: 'set', values: RESET_FRAMING }, opts)).toEqual({ zoom: 1, ox: 0, oy: 0 });
 	});
 });

@@ -17,6 +17,7 @@ import {
 } from './captions';
 import type { Span } from './grid';
 import { DEFAULT_LINES, drawLines, type LineStyle } from './lines';
+import { applyEdits, editedPreview, editedSize, type ImageEdits } from './edits';
 
 export type FitMode = 'fill' | 'fit';
 
@@ -27,7 +28,14 @@ export type Background =
 	| { kind: 'image'; image: ImageBitmap };
 
 /** `source` is null for an empty slot, which keeps its place, cell background and captions. */
-export type Drawable = Captioned & { source: CanvasImageSource | null; width: number; height: number; adjust: Adjust };
+export type Drawable = Captioned & {
+	source: CanvasImageSource | null;
+	/** The original image's size, before edits. */
+	width: number;
+	height: number;
+	adjust: Adjust;
+	edits?: ImageEdits;
+};
 
 /** One cell of the grid. An empty slot has no file, no thumbnail and a size of 0 × 0. */
 export type GridImage = {
@@ -39,7 +47,10 @@ export type GridImage = {
 	/** Downscaled copy used for the on-screen preview. */
 	thumb: ImageBitmap | null;
 	thumbUrl: string;
+	/** How the image sits in its cell. */
 	adjust: Adjust;
+	/** Changes to the image itself (rotation, color…), which it keeps in any cell. */
+	edits: ImageEdits;
 	/** Grid cells this image covers across and down. */
 	span: Span;
 	title: RichText;
@@ -63,6 +74,7 @@ export function emptySlot(id = `slot-${Date.now()}-${slotCounter++}`): GridImage
 		thumb: null,
 		thumbUrl: '',
 		adjust: { ...DEFAULT_ADJUST },
+		edits: {},
 		span: { w: 1, h: 1 },
 		title: [],
 		desc: []
@@ -127,7 +139,7 @@ export const DEFAULT_STYLE: CellStyle = {
 
 /** `visible` is the box that gets corners, shadow and border; `clip` is where the image may draw. */
 type PlanItem = { cell: Rect; place: Rect; visible: Rect; clip: Rect; radius: number };
-type Sized = { width: number; height: number; adjust: Adjust };
+type Sized = { width: number; height: number; adjust: Adjust; edits?: ImageEdits };
 
 /**
  * Where each image lands: the part of the cell it covers (all of it for fill) and its corner
@@ -158,7 +170,8 @@ function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: Cell
 		// An empty slot shows only its cell background, so without one there is nothing to draw.
 		if (img.width <= 0 || img.height <= 0)
 			return boxed ? { cell, place: inner, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) } : null;
-		const place = placeImage(img.width, img.height, inner, fit, img.adjust, style.fill.on);
+		const size = editedSize(img.width, img.height, img.edits);
+		const place = placeImage(size.width, size.height, inner, fit, img.adjust, style.fill.on);
 		if (boxed) return { cell, place, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) };
 		const x = Math.max(inner.x, place.x);
 		const y = Math.max(inner.y, place.y);
@@ -339,8 +352,8 @@ export function drawGrid(
 	for (const layer of layerOrder(opts.style)) {
 		if (layer === 'image')
 			items.forEach((it, i) => {
-				const src = imgs[i]?.source;
-				if (it && src) drawImage(ctx, it, src, inset);
+				const d = imgs[i];
+				if (it && d?.source) drawImage(ctx, it, editedPreview(d.source as Editable, d.edits), inset);
 			});
 		else if (layer === 'fade') drawFades(ctx, items, imgs, opts.style);
 		else drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
@@ -358,6 +371,15 @@ let counter = 0;
 
 export async function decode(file: File): Promise<ImageBitmap> {
 	return createImageBitmap(file, { imageOrientation: 'from-image' });
+}
+
+type Editable = Parameters<typeof applyEdits>[0];
+
+/** The full-size image with its edits, for exports. Call `done` once it has been drawn. */
+async function decodeEdited(img: GridImage & { file: File }): Promise<{ source: CanvasImageSource; done: () => void }> {
+	const bmp = await decode(img.file);
+	const source = applyEdits(bmp, img.edits);
+	return { source, done: () => bmp.close() };
 }
 
 export async function downscale(bmp: ImageBitmap, max: number): Promise<ImageBitmap> {
@@ -385,6 +407,7 @@ export async function loadImage(file: File): Promise<GridImage> {
 		thumb,
 		thumbUrl: URL.createObjectURL(file),
 		adjust: { ...DEFAULT_ADJUST },
+		edits: {},
 		span: { w: 1, h: 1 },
 		title: [],
 		desc: []
@@ -417,11 +440,11 @@ export async function renderFull(
 		else
 			for (let i = 0; i < items.length; i++) {
 				const it = items[i];
-				const file = images[i]?.file;
-				if (!it || !file) continue;
-				const bmp = await decode(file);
-				drawImage(ctx, it, bmp, borderInset(opts.style, 1));
-				bmp.close();
+				const img = images[i];
+				if (!it || !hasImage(img)) continue;
+				const { source, done } = await decodeEdited(img);
+				drawImage(ctx, it, source, borderInset(opts.style, 1));
+				done();
 			}
 	}
 	drawBorders(ctx, items, opts.style);
@@ -490,7 +513,8 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 		const add = (l: PsdLayer | null) => l && group.push(l);
 		if (it && st.shadow.on && st.shadow.strength > 0) add(layer('Shadow', around, (ctx) => drawShadows(ctx, [it], st, 1)));
 		if (it && st.fill.on && st.fill.opacity > 0) add(layer('Cell background', cell, (ctx) => drawFills(ctx, [it], st, opts.cellBackground)));
-		const bmp = it && img.file ? await decode(img.file) : null;
+		const full = it && hasImage(img) ? await decodeEdited(img) : null;
+		const bmp = full?.source;
 		for (const l of order) {
 			if (l === 'image') {
 				if (it && bmp) add(layer('Image', it.clip, (ctx) => drawImage(ctx, it, bmp, borderInset(st, 1))));
@@ -502,7 +526,7 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 				if (c.desc.on && !isEmpty(img.desc)) add(layer('Description', textBox, (ctx) => drawCaptions(ctx, [cell], [{ desc: img.desc }], c, 1)));
 			}
 		}
-		bmp?.close();
+		full?.done();
 		if (it && st.border.on && st.border.width > 0) add(layer('Border', around, (ctx) => drawBorders(ctx, [it], st)));
 		const title = plainText(img.title).trim() || img.name.replace(/\.[^.]+$/, '');
 		groups.push({ name: `${String(i + 1).padStart(Math.max(2, digits), '0')} ${title}`.slice(0, 250), children: group, opened: false });
@@ -544,8 +568,8 @@ export async function renderCells(
 	const out: { index: number; blob: Blob }[] = [];
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i];
-		const file = images[i]?.file;
-		if (!it || !file) continue;
+		const img = images[i];
+		if (!it || !hasImage(img)) continue;
 		const box = caps
 			? { x: it.cell.x, y: it.cell.y - layout.bandAbove, w: it.cell.w, h: it.cell.h + layout.bandAbove + layout.bandBelow }
 			: it.visible;
@@ -559,14 +583,14 @@ export async function renderCells(
 		ctx.translate(-left, -top);
 		drawShadows(ctx, [it], style, 1);
 		drawFills(ctx, [it], style, opts.cellBackground);
-		const bmp = await decode(file);
+		const { source, done } = await decodeEdited(img);
 		for (const layer of layerOrder(style)) {
-			if (layer === 'image') drawImage(ctx, it, bmp, borderInset(style, 1));
+			if (layer === 'image') drawImage(ctx, it, source, borderInset(style, 1));
 			else if (!caps) continue;
 			else if (layer === 'fade') drawFades(ctx, [it], [images[i]], style);
 			else drawCaptions(ctx, [it.cell], [images[i]], style.captions, 1);
 		}
-		bmp.close();
+		done();
 		drawBorders(ctx, [it], style);
 		out.push({ index: i, blob: await canvasToBlob(canvas, 'png') });
 	}

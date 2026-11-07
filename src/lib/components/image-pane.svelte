@@ -1,18 +1,36 @@
 <!--
   @component
-  The Image tab: edits the selected cells together. Each setting from CELL_SETTINGS gets a slider
-  that sets the same value on every selected cell, and shows Mixed while they differ.
+  The Image tab: edits the selected cells together. Framing comes from CELL_SETTINGS and image
+  edits from the operations registry; each slider sets the same value on every selected image and
+  shows Mixed while they differ. Rotate and flip buttons turn each image from where it is.
 -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import ClipboardPasteIcon from '@lucide/svelte/icons/clipboard-paste';
+	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw-square';
+	import RotateCwIcon from '@lucide/svelte/icons/rotate-cw-square';
+	import FlipHorizontalIcon from '@lucide/svelte/icons/flip-horizontal-2';
+	import FlipVerticalIcon from '@lucide/svelte/icons/flip-vertical-2';
 	import SliderField from './slider-field.svelte';
-	import { CELL_SETTINGS, RESET_SETTINGS, sharedValue, type CellChange, type CellSetting } from '$lib/cell-edits';
+	import InfoTip from './info-tip.svelte';
+	import { CELL_SETTINGS, RESET_FRAMING, sharedValue, type CellChange, type CellSetting } from '$lib/cell-edits';
 	import type { Adjust } from '$lib/grid';
+	import {
+		GROUP_LABELS,
+		OPERATIONS,
+		resetGroups,
+		sharedEdit,
+		valueOf,
+		paramById,
+		type ImageEdits,
+		type NumberParam,
+		type OperationGroup
+	} from '$lib/edits';
 
 	let {
 		adjusts,
+		edits,
 		total,
 		mod,
 		onedit,
@@ -23,6 +41,8 @@
 	}: {
 		/** The framing of each selected image. */
 		adjusts: Adjust[];
+		/** The edits of each selected image, in the same order. */
+		edits: ImageEdits[];
 		/** How many images could be selected. */
 		total: number;
 		/** The shortcut modifier, such as ⌘ or Ctrl+. */
@@ -52,6 +72,24 @@
 	const bindings = framing.map((s) => ({ s, b: binding(s) }));
 	const changed = $derived(adjusts.some((a) => framing.some((s) => Math.abs(a[s.key] - s.initial) > 1e-6)));
 	const offCenter = $derived(adjusts.some((a) => a.ox !== 0 || a.oy !== 0));
+
+	// Image edits, one section per registry group. Geometry has its own buttons; other groups
+	// show a slider for each number parameter.
+	const SLIDER_GROUPS: OperationGroup[] = ['light', 'color'];
+	const sliders = (g: OperationGroup) =>
+		OPERATIONS.filter((op) => op.group === g).flatMap((op) => op.params.filter((p): p is NumberParam => p.kind === 'number'));
+	const angle = paramById('angle') as NumberParam;
+	const angleBinding = editBinding(angle);
+	function editBinding(p: NumberParam) {
+		return {
+			get: () => Number(sharedEdit(edits, p.id) ?? valueOf(edits[0], p.id)),
+			set: (v: number) => onedit({ kind: 'edit', values: { [p.id]: v } })
+		};
+	}
+	const groupParams = (g: OperationGroup) => OPERATIONS.filter((op) => op.group === g).flatMap((op) => op.params);
+	const groupChanged = (g: OperationGroup) => edits.some((e) => groupParams(g).some((p) => e[p.id] !== undefined));
+	const resetGroup = (g: OperationGroup) => onedit({ kind: 'edit', values: resetGroups([g]) });
+	const mixedEdit = (id: string) => count > 1 && sharedEdit(edits, id) === null;
 </script>
 
 <section class="pane-section space-y-3" data-testid="image-pane">
@@ -81,7 +119,7 @@
 			<h2 class="pane-title">Framing</h2>
 			<div class="flex items-center gap-1">
 				<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!offCenter} onclick={() => onedit({ kind: 'set', values: { ox: 0, oy: 0 } })} data-testid="bulk-center">Center</Button>
-				<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!changed} onclick={() => onedit({ kind: 'set', values: RESET_SETTINGS })} data-testid="bulk-reset">Reset</Button>
+				<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!changed} onclick={() => onedit({ kind: 'set', values: RESET_FRAMING })} data-testid="bulk-reset">Reset</Button>
 			</div>
 		</div>
 		{#each bindings as { s, b } (s.key)}
@@ -93,9 +131,52 @@
 				step={s.uiStep}
 				unit={s.unit}
 				mixed={count > 1 && sharedValue(adjusts, s.key) === null}
-			/>
+			>
+				{#snippet extra()}<span class="w-4 shrink-0"></span>{/snippet}
+			</SliderField>
 		{/each}
 	</section>
+
+	<section class="pane-section space-y-2" data-testid="edit-geometry">
+		<div class="flex items-center justify-between">
+			<h2 class="pane-title">{GROUP_LABELS.geometry}</h2>
+			<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!groupChanged('geometry')} onclick={() => resetGroup('geometry')}>Reset</Button>
+		</div>
+		<div class="flex items-center gap-1">
+			<Button variant="outline" size="icon" class="size-8" title="Rotate left" aria-label="Rotate left" onclick={() => onedit({ kind: 'shift', id: 'turn', by: -90 })} data-testid="rotate-left">
+				<RotateCcwIcon />
+			</Button>
+			<Button variant="outline" size="icon" class="size-8" title="Rotate right" aria-label="Rotate right" onclick={() => onedit({ kind: 'shift', id: 'turn', by: 90 })} data-testid="rotate-right">
+				<RotateCwIcon />
+			</Button>
+			<Button variant="outline" size="icon" class="size-8" title="Flip horizontal" aria-label="Flip horizontal" onclick={() => onedit({ kind: 'shift', id: 'flipH', by: 1 })} data-testid="flip-h">
+				<FlipHorizontalIcon />
+			</Button>
+			<Button variant="outline" size="icon" class="size-8" title="Flip vertical" aria-label="Flip vertical" onclick={() => onedit({ kind: 'shift', id: 'flipV', by: 1 })} data-testid="flip-v">
+				<FlipVerticalIcon />
+			</Button>
+		</div>
+		<SliderField label={angle.label} bind:value={angleBinding.get, angleBinding.set} min={angle.min} max={angle.max} step={angle.step} unit={angle.unit} mixed={mixedEdit(angle.id)}>
+			{#snippet extra()}<InfoTip text={angle.tip ?? ''} />{/snippet}
+		</SliderField>
+	</section>
+
+	{#each SLIDER_GROUPS as g (g)}
+		<section class="pane-section space-y-2" data-testid="edit-{g}">
+			<div class="flex items-center justify-between">
+				<h2 class="pane-title">{GROUP_LABELS[g]}</h2>
+				<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!groupChanged(g)} onclick={() => resetGroup(g)}>Reset</Button>
+			</div>
+			{#each sliders(g) as p (p.id)}
+				{@const b = editBinding(p)}
+				<SliderField label={p.label} bind:value={b.get, b.set} min={p.min} max={p.max} step={p.step} unit={p.unit} mixed={mixedEdit(p.id)}>
+					{#snippet extra()}
+						{#if p.tip}<InfoTip text={p.tip} />{:else}<span class="w-4 shrink-0"></span>{/if}
+					{/snippet}
+				</SliderField>
+			{/each}
+		</section>
+	{/each}
 
 	<section class="pane-section space-y-2">
 		<h2 class="pane-title">Copy and paste</h2>
