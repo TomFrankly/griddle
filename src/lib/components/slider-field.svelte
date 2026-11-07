@@ -17,7 +17,8 @@
 		disabled = false,
 		shown,
 		extra,
-		reserve = false
+		reserve = false,
+		mixed = false
 	}: {
 		label: string;
 		value: number;
@@ -30,14 +31,16 @@
 		shown?: number;
 		extra?: Snippet;
 		reserve?: boolean;
+		/** The edited items differ: the box says Mixed until a value is set. */
+		mixed?: boolean;
 	} = $props();
 </script>
 
 <div class="flex min-h-8 items-center gap-2.5">
 	<span class="w-[6.5rem] shrink-0 truncate text-sm" class:text-muted-foreground={disabled}>{label}</span>
-	<Slider type="single" bind:value {min} {max} {step} {disabled} class="min-w-0 flex-1 {disabled ? 'opacity-40' : ''}" aria-label={label} />
+	<Slider type="single" bind:value {min} {max} {step} {disabled} class="min-w-0 flex-1 {disabled ? 'opacity-40' : mixed ? 'opacity-60' : ''}" aria-label={label} />
 	{#if shown === undefined}
-		<NumberInput bind:value {min} {max} {step} {unit} {disabled} label="{label} value" />
+		<NumberInput bind:value {min} {max} {step} {unit} {disabled} {mixed} label="{label} value" />
 	{:else}
 		<NumberInput value={shown} {unit} disabled label="{label} value" />
 	{/if}

@@ -20,7 +20,10 @@
 	import SquarePlusIcon from '@lucide/svelte/icons/square-plus';
 	import Stepper from './stepper.svelte';
 	import RichText from './rich-text.svelte';
+	import CopyIcon from '@lucide/svelte/icons/copy';
+	import ClipboardPasteIcon from '@lucide/svelte/icons/clipboard-paste';
 	import { minZoom, placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
+	import { applyChange, RESET_SETTINGS, type CellChange } from '$lib/cell-edits';
 	import type { FitMode, GridImage } from '$lib/render';
 	import type { CaptionStyle } from '$lib/captions';
 
@@ -41,7 +44,11 @@
 		onremove,
 		onclear,
 		onaddslot,
-		lifted = false
+		lifted = false,
+		selected = false,
+		onedit,
+		oncopysettings,
+		onpastesettings
 	}: {
 		rect: Rect;
 		/** Where the image may sit inside the cell, when that is smaller than the cell. */
@@ -53,7 +60,14 @@
 		/** The cell has its own background, so the image may slide off its edges. */
 		free?: boolean;
 		/** A plain click on the cell, not a drag. */
-		onselect?: () => void;
+		onselect?: (e: MouseEvent) => void;
+		/** Part of the selection: shows a ring, and edits here apply to every selected cell. */
+		selected?: boolean;
+		/** Handles a framing change; without it the change applies to this cell only. */
+		onedit?: (change: CellChange) => void;
+		oncopysettings?: () => void;
+		/** Missing while nothing has been copied. */
+		onpastesettings?: () => void;
 		onfiles?: (files: FileList) => void;
 		cols?: number;
 		rows?: number;
@@ -151,7 +165,14 @@
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
 	// Hover controls are 28 px round; this keeps them inside the cell's rounded corners.
 	const controlInset = $derived(Math.max(6, Math.round((Math.min(radius, Math.min(rect.w, rect.h) / 2) - 14) * (1 - Math.SQRT1_2))));
-	const clampTo = (n: number, lim: number) => Math.min(lim, Math.max(-lim, n));
+	function edit(change: CellChange) {
+		if (onedit) onedit(change);
+		else image.adjust = applyChange({ ...image, area: box }, change, { fit, free });
+	}
+	const zoomBinding = {
+		get: () => image.adjust.zoom,
+		set: (v: number) => edit({ kind: 'set', values: { zoom: v } })
+	};
 
 	let pressAt: { x: number; y: number } | null = null;
 	function onClick(e: MouseEvent) {
@@ -159,7 +180,7 @@
 		pressAt = null;
 		if ((e.target as Element).closest('[data-cell-control]')) return;
 		if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) > 4) return;
-		onselect?.();
+		onselect?.(e);
 	}
 
 	function onPointerDown(e: PointerEvent) {
@@ -170,11 +191,12 @@
 		const el = e.currentTarget as HTMLElement;
 		el.setPointerCapture(e.pointerId);
 		dragging = true;
-		const start = { x: e.clientX, y: e.clientY, ox: image.adjust.ox, oy: image.adjust.oy };
-		const { slackX, slackY, limitX, limitY } = place;
+		let last = { x: e.clientX, y: e.clientY };
 		const move = (ev: PointerEvent) => {
-			if (limitX > 0.001) image.adjust.ox = clampTo(start.ox - (2 * (ev.clientX - start.x)) / slackX, limitX);
-			if (limitY > 0.001) image.adjust.oy = clampTo(start.oy - (2 * (ev.clientY - start.y)) / slackY, limitY);
+			const dx = ev.clientX - last.x;
+			const dy = ev.clientY - last.y;
+			last = { x: ev.clientX, y: ev.clientY };
+			if (dx || dy) edit({ kind: 'pan', dx, dy });
 		};
 		const up = () => {
 			dragging = false;
@@ -191,18 +213,16 @@
 		// With Ctrl or Cmd held, scrolling zooms the whole view instead.
 		if (e.ctrlKey || e.metaKey || empty) return;
 		e.preventDefault();
-		const z = image.adjust.zoom * Math.exp(-e.deltaY * 0.002);
-		image.adjust.zoom = Math.min(ZOOM_MAX, Math.max(zoomMin, z));
+		edit({ kind: 'zoom', factor: Math.exp(-e.deltaY * 0.002) });
 	}
 
 	function recenter(e: MouseEvent) {
 		if ((e.target as Element).closest('[data-cell-control]')) return;
-		image.adjust.ox = 0;
-		image.adjust.oy = 0;
+		edit({ kind: 'set', values: { ox: 0, oy: 0 } });
 	}
 
 	function reset() {
-		image.adjust = { zoom: 1, ox: 0, oy: 0 };
+		edit({ kind: 'set', values: RESET_SETTINGS });
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -213,7 +233,7 @@
 			}
 			return;
 		}
-		const step = e.shiftKey ? 0.2 : 0.05;
+		const step = e.shiftKey ? 40 : 8;
 		const d: Record<string, [number, number]> = {
 			ArrowLeft: [-step, 0],
 			ArrowRight: [step, 0],
@@ -223,8 +243,7 @@
 		const m = d[e.key];
 		if (!m) return;
 		e.preventDefault();
-		image.adjust.ox = clampTo(image.adjust.ox - m[0], place.limitX);
-		image.adjust.oy = clampTo(image.adjust.oy - m[1], place.limitY);
+		edit({ kind: 'pan', dx: m[0], dy: m[1] });
 	}
 </script>
 
@@ -248,6 +267,7 @@
 	data-testid="cell"
 	data-empty={empty || undefined}
 	data-index={index}
+	data-selected={selected || undefined}
 	onpointerdown={onPointerDown}
 	onwheel={onWheel}
 	onkeydown={onKey}
@@ -321,7 +341,7 @@
 							<span>Zoom</span>
 							<button type="button" class="text-muted-foreground hover:text-foreground text-xs disabled:opacity-40" disabled={!adjusted} onclick={reset}>Reset</button>
 						</div>
-						<Slider type="single" min={zoomMin} max={ZOOM_MAX} step={0.01} bind:value={image.adjust.zoom} aria-label="Zoom image {index + 1}" />
+						<Slider type="single" min={zoomMin} max={ZOOM_MAX} step={0.01} bind:value={zoomBinding.get, zoomBinding.set} aria-label="Zoom image {index + 1}" />
 					</div>
 				{/if}
 				{#if hasCaptions && captions}
@@ -337,6 +357,32 @@
 				<button type="button" class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm" onclick={() => fileInput?.click()} data-testid="cell-pick">
 					{#if empty}<ImagePlusIcon class="size-4" /> Add image{:else}<ImageUpIcon class="size-4" /> Replace image{/if}
 				</button>
+				{#if !empty && oncopysettings}
+					<button
+						type="button"
+						class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
+						onclick={() => {
+							allOpen = false;
+							oncopysettings();
+						}}
+						data-testid="cell-copy-settings"
+					>
+						<CopyIcon class="size-4" /> Copy settings
+					</button>
+				{/if}
+				{#if !empty && onpastesettings}
+					<button
+						type="button"
+						class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
+						onclick={() => {
+							allOpen = false;
+							onpastesettings();
+						}}
+						data-testid="cell-paste-settings"
+					>
+						<ClipboardPasteIcon class="size-4" /> Paste settings{selected ? ' to selected' : ''}
+					</button>
+				{/if}
 				{#if onclear && !empty}
 					<button
 						type="button"
@@ -498,11 +544,19 @@
 				min={zoomMin}
 				max={ZOOM_MAX}
 				step={0.01}
-				bind:value={image.adjust.zoom}
+				bind:value={zoomBinding.get, zoomBinding.set}
 				aria-label="Zoom image {index + 1}"
 				data-testid="cell-zoom"
 			/>
 		</div>
 		{/if}
+	{/if}
+	{#if selected}
+		<!-- Two rings, dark then light, so the selection reads on any image. -->
+		<div
+			class="pointer-events-none absolute inset-0 shadow-[inset_0_0_0_2px_var(--primary),inset_0_0_0_4px_var(--background)]"
+			style:border-radius="{radius}px"
+			data-testid="cell-selected"
+		></div>
 	{/if}
 </div>

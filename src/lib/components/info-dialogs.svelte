@@ -30,7 +30,7 @@
 			</li>
 			<li>
 				<span class="font-medium">3. Frame each image.</span>
-				Drag an image to reposition it, scroll over it to zoom, and double-click to center it again. Right-click a cell for all of its options.
+				Drag an image to reposition it, scroll over it to zoom, and double-click to center it again. Right-click a cell for all of its options. To frame several at once, Shift-click them or drag across the grid from outside it, then zoom or move any of them, or use the Image tab.
 			</li>
 			<li>
 				<span class="font-medium">4. Style the grid.</span>
@@ -50,6 +50,11 @@
 				<span>{@render keys([mod, '0'])}</span><span>Fit the view</span>
 				<span>{@render keys(['Space', 'drag'])}</span><span>Pan the view</span>
 				<span>{@render keys(['Shift', '1'])}</span><span>Fit and center</span>
+				<span>{@render keys(['Shift', 'click'])}</span><span>Add an image to the selection</span>
+				<span>{@render keys([mod, 'A'])}</span><span>Select every image</span>
+				<span>{@render keys(['Esc'])}</span><span>Clear the selection</span>
+				<span>{@render keys(isMac ? ['⌥', mod, 'C'] : [mod, 'Alt', 'C'])}</span><span>Copy an image's settings</span>
+				<span>{@render keys(isMac ? ['⌥', mod, 'V'] : [mod, 'Alt', 'V'])}</span><span>Paste them onto the selection</span>
 			</div>
 		</div>
 	</Dialog.Content>
