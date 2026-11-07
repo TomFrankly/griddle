@@ -4,6 +4,7 @@
  */
 import { DEFAULT_CAPTIONS, type TextStyle } from './captions';
 import { DEFAULT_STYLE, type CellStyle, type FitMode } from './render';
+import type { Arrange, FrameFill } from './masonry';
 
 export type Look = {
 	gap: number;
@@ -28,6 +29,9 @@ export type LookCanvas = {
 	autoLayout: boolean;
 	cols: number;
 	rows: number;
+	arrange?: Arrange;
+	frameFill?: FrameFill;
+	evenBottoms?: boolean;
 };
 
 export type NamedLook = { id: string; name: string; look: Look };
