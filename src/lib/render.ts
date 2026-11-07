@@ -18,6 +18,7 @@ import {
 import type { Span } from './grid';
 import { DEFAULT_LINES, drawLines, type LineStyle } from './lines';
 import { applyEdits, editedPreview, editedSize, type ImageEdits } from './edits';
+import { focusOf, framePlace } from './cell-edits';
 
 export type FitMode = 'fill' | 'fit';
 
@@ -171,7 +172,7 @@ function plan(layout: Layout, sizes: (Sized | null)[], fit: FitMode, style: Cell
 		if (img.width <= 0 || img.height <= 0)
 			return boxed ? { cell, place: inner, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) } : null;
 		const size = editedSize(img.width, img.height, img.edits);
-		const place = placeImage(size.width, size.height, inner, fit, img.adjust, style.fill.on);
+		const place = framePlace(size.width, size.height, inner, fit, img.adjust, style.fill.on, focusOf(img.edits));
 		if (boxed) return { cell, place, visible: cell, clip: inner, radius: (pct / 100) * (Math.min(cell.w, cell.h) / 2) };
 		const x = Math.max(inner.x, place.x);
 		const y = Math.max(inner.y, place.y);

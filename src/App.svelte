@@ -30,6 +30,7 @@
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import { ALL_GROUPS, applyChange, applyImageEdit, copySettings, isImageEdit, pasteChanges, type CellChange, type CellSettings } from '$lib/cell-edits';
 	import { editedSize, normalizeEdits, resetGroups, type ImageEdits } from '$lib/edits';
+	import { focusOf } from '$lib/cell-edits';
 	import { ActionRegistry } from '$lib/actions/registry';
 	import LineStyleFields from '$lib/components/line-style-fields.svelte';
 	import BackgroundPicker from '$lib/components/background-picker.svelte';
@@ -450,11 +451,17 @@
 				continue;
 			}
 			const size = editedSize(img.width, img.height, img.edits);
-			img.adjust = applyChange({ adjust: img.adjust, ...size, area: displayAreas[j] ?? null }, change, {
+			img.adjust = applyChange({ adjust: img.adjust, ...size, area: displayAreas[j] ?? null, focus: focusOf(img.edits) }, change, {
 				fit,
 				free: style.fill.on
 			});
 		}
+	}
+
+	/** Sets one image's focal point and centers it there; later zooms and cell changes keep it in view. */
+	function setFocus(i: number, x: number, y: number) {
+		editImages([i], { kind: 'edit', values: { focusX: x * 100, focusY: y * 100 } });
+		editImages([i], { kind: 'set', values: { ox: 0, oy: 0 } });
 	}
 
 	// Copy settings keeps one image's settings to paste onto others.
@@ -2241,6 +2248,7 @@
 										selected={selectedSet.has(images[i].id)}
 										onedit={(change) => editCell(i, change)}
 										oncopysettings={() => copySettingsFrom(i)}
+										onfocus={(x, y) => setFocus(i, x, y)}
 										onpastesettings={copiedSettings ? () => pasteSettings(selectedSet.has(images[i].id) ? selectedIdx : [i]) : undefined}
 										image={images[i]}
 										{fit}

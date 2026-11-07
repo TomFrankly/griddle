@@ -53,8 +53,9 @@ export type Param = NumberParam | ToggleParam | ChoiceParam | ColorParam;
  * Where an operation runs:
  * - `geometry` changes the image's shape (turns, flips, rotation) on a 2D canvas.
  * - `pixel` changes each pixel's color in one WebGL pass shared by all pixel operations.
+ * - `framing` changes no pixels; it guides how the image is placed in its cell.
  */
-export type OperationStage = 'geometry' | 'pixel';
+export type OperationStage = 'geometry' | 'pixel' | 'framing';
 
 /** Operations in the same group are shown together and can be pasted together. */
 export type OperationGroup = 'geometry' | 'light' | 'color' | 'looks' | 'effects';
@@ -126,6 +127,16 @@ export const OPERATIONS: Operation[] = [
 				bulk: 'relative',
 				tip: 'Turns the image and crops it so no corners show.'
 			})
+		]
+	},
+	{
+		id: 'focus',
+		label: 'Focal point',
+		group: 'geometry',
+		stage: 'framing',
+		params: [
+			num('focusX', 'Focal point across', 0, 100, { initial: 50, step: 0.1, unit: '%', bulk: 'single' }),
+			num('focusY', 'Focal point down', 0, 100, { initial: 50, step: 0.1, unit: '%', bulk: 'single' })
 		]
 	},
 	{

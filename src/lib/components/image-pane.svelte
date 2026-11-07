@@ -75,6 +75,13 @@
 	const bindings = framing.map((s) => ({ s, b: binding(s) }));
 	const changed = $derived(adjusts.some((a) => framing.some((s) => Math.abs(a[s.key] - s.initial) > 1e-6)));
 	const offCenter = $derived(adjusts.some((a) => a.ox !== 0 || a.oy !== 0));
+	const hasFocus = $derived(edits.some((e) => e.focusX !== undefined || e.focusY !== undefined));
+	type Side = -1 | 0 | 1;
+	const ALIGN: [Side, [Side, string][]][] = [
+		[-1, [[-1, 'top left'], [0, 'top'], [1, 'top right']]],
+		[0, [[-1, 'left'], [0, 'center'], [1, 'right']]],
+		[1, [[-1, 'bottom left'], [0, 'bottom'], [1, 'bottom right']]]
+	];
 
 	// Image edits, one section per registry group. Geometry has its own buttons; other groups
 	// show a control for each parameter, and operations with an on switch show the rest of their
@@ -138,6 +145,30 @@
 				{#snippet extra()}<span class="w-4 shrink-0"></span>{/snippet}
 			</SliderField>
 		{/each}
+		<div class="flex min-h-8 items-start gap-2.5">
+			<span class="w-[6.5rem] shrink-0 pt-1 text-sm">Align</span>
+			<div class="grid grid-cols-3 border" role="group" aria-label="Align in cell" data-testid="align">
+				{#each ALIGN as [y, row] (y)}
+					{#each row as [x, name] (x)}
+						<button
+							type="button"
+							class="hover:bg-muted flex size-6 items-center justify-center"
+							title="Align {name}"
+							aria-label="Align {name}"
+							onclick={() => onedit({ kind: 'align', x, y })}
+						>
+							<span class="bg-foreground/70 size-1.5 rounded-full"></span>
+						</button>
+					{/each}
+				{/each}
+			</div>
+		</div>
+		<div class="flex min-h-8 items-center gap-2.5">
+			<span class="w-[6.5rem] shrink-0 text-sm">Focal point</span>
+			<span class="text-muted-foreground flex-1 text-sm">{hasFocus ? (count > 1 ? 'Set on some' : 'Set') : 'None'}</span>
+			<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!hasFocus} onclick={() => onedit({ kind: 'edit', values: { focusX: 50, focusY: 50 } })} data-testid="clear-focus">Clear</Button>
+			<InfoTip text="Alt-click an image to set the spot that stays in view as you zoom or reshape its cell." />
+		</div>
 	</section>
 
 	<section class="pane-section space-y-2" data-testid="edit-geometry">

@@ -22,8 +22,8 @@
 	import RichText from './rich-text.svelte';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import ClipboardPasteIcon from '@lucide/svelte/icons/clipboard-paste';
-	import { minZoom, placeImage, ZOOM_MAX, type Rect } from '$lib/grid';
-	import { applyChange, RESET_FRAMING, type CellChange } from '$lib/cell-edits';
+	import { minZoom, ZOOM_MAX, type Rect } from '$lib/grid';
+	import { applyChange, focusOf, framePlace, RESET_FRAMING, type CellChange } from '$lib/cell-edits';
 	import type { FitMode, GridImage } from '$lib/render';
 	import { editedSize } from '$lib/edits';
 	import type { CaptionStyle } from '$lib/captions';
@@ -49,7 +49,8 @@
 		selected = false,
 		onedit,
 		oncopysettings,
-		onpastesettings
+		onpastesettings,
+		onfocus
 	}: {
 		rect: Rect;
 		/** Where the image may sit inside the cell, when that is smaller than the cell. */
@@ -69,6 +70,8 @@
 		oncopysettings?: () => void;
 		/** Missing while nothing has been copied. */
 		onpastesettings?: () => void;
+		/** Alt-click sets the image's focal point: x and y from 0 to 1 across the image. */
+		onfocus?: (x: number, y: number) => void;
 		onfiles?: (files: FileList) => void;
 		cols?: number;
 		rows?: number;
@@ -161,7 +164,8 @@
 	const box = $derived(area ?? rect);
 	const NO_PLACE = { x: 0, y: 0, w: 0, h: 0, slackX: 1, slackY: 1, limitX: 0, limitY: 0 };
 	const size = $derived(editedSize(image.width, image.height, image.edits));
-	const place = $derived(empty ? NO_PLACE : placeImage(size.width, size.height, box, fit, image.adjust, free));
+	const focus = $derived(focusOf(image.edits));
+	const place = $derived(empty ? NO_PLACE : framePlace(size.width, size.height, box, fit, image.adjust, free, focus));
 	const zoomMin = $derived(empty ? 1 : Math.floor(minZoom(size.width, size.height, box, fit) * 100) / 100);
 	const movable = $derived(place.limitX > 0.001 || place.limitY > 0.001);
 	const adjusted = $derived(image.adjust.zoom !== 1 || image.adjust.ox !== 0 || image.adjust.oy !== 0);
@@ -169,7 +173,7 @@
 	const controlInset = $derived(Math.max(6, Math.round((Math.min(radius, Math.min(rect.w, rect.h) / 2) - 14) * (1 - Math.SQRT1_2))));
 	function edit(change: CellChange) {
 		if (onedit) onedit(change);
-		else image.adjust = applyChange({ ...image, ...size, area: box }, change, { fit, free });
+		else image.adjust = applyChange({ ...image, ...size, area: box, focus }, change, { fit, free });
 	}
 	const zoomBinding = {
 		get: () => image.adjust.zoom,
@@ -182,6 +186,13 @@
 		pressAt = null;
 		if ((e.target as Element).closest('[data-cell-control]')) return;
 		if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) > 4) return;
+		if (e.altKey && onfocus && !empty) {
+			const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+			const x = (e.clientX - r.left + rect.x - place.x) / place.w;
+			const y = (e.clientY - r.top + rect.y - place.y) / place.h;
+			if (x >= 0 && x <= 1 && y >= 0 && y <= 1) onfocus(x, y);
+			return;
+		}
 		onselect?.(e);
 	}
 
@@ -215,7 +226,10 @@
 		// With Ctrl or Cmd held, scrolling zooms the whole view instead.
 		if (e.ctrlKey || e.metaKey || empty) return;
 		e.preventDefault();
-		edit({ kind: 'zoom', factor: Math.exp(-e.deltaY * 0.002) });
+		// Zoom around the pointer, as a share of the cell, so other selected cells zoom around the same spot.
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const at = { u: (e.clientX - r.left - (box.x - rect.x)) / box.w, v: (e.clientY - r.top - (box.y - rect.y)) / box.h };
+		edit({ kind: 'zoom', factor: Math.exp(-e.deltaY * 0.002), at });
 	}
 
 	function recenter(e: MouseEvent) {
@@ -552,6 +566,16 @@
 			/>
 		</div>
 		{/if}
+	{/if}
+	{#if focus && !empty}
+		<!-- The focal point, shown while the cell is hovered or selected. -->
+		<div
+			class="pointer-events-none absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white opacity-0 shadow-[0_0_0_1px_rgb(0_0_0/0.5)] transition-opacity group-hover/cell:opacity-100"
+			class:opacity-100={selected}
+			style:left="{place.x - rect.x + focus.x * place.w}px"
+			style:top="{place.y - rect.y + focus.y * place.h}px"
+			data-testid="cell-focus"
+		></div>
 	{/if}
 	{#if selected}
 		<!-- Two rings, dark then light, so the selection reads on any image. -->

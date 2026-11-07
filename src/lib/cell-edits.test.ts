@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyChange, copySettings, RESET_FRAMING, sharedValue, type EditTarget } from './cell-edits';
+import { applyChange, copySettings, focusOf, framePlace, RESET_FRAMING, sharedValue, type EditTarget } from './cell-edits';
 import { ZOOM_MAX } from './grid';
 
 const opts = { fit: 'fill' as const, free: false };
@@ -50,5 +50,48 @@ describe('sharedValue and copied settings', () => {
 	it('copies every setting and resets to the starting values', () => {
 		expect(copySettings({ zoom: 2, ox: 0.1, oy: -0.2 }).framing).toEqual({ zoom: 2, ox: 0.1, oy: -0.2 });
 		expect(applyChange(wide({ zoom: 2, ox: 0.3, oy: 0 }), { kind: 'set', values: RESET_FRAMING }, opts)).toEqual({ zoom: 1, ox: 0, oy: 0 });
+	});
+});
+
+describe('zooming around a point, aligning and focal points', () => {
+	const at = (t: EditTarget, u: number, v: number) => {
+		const p = framePlace(t.width, t.height, cell, 'fill', t.adjust, false, t.focus);
+		return { x: (cell.x + u * cell.w - p.x) / p.w, y: (cell.y + v * cell.h - p.y) / p.h };
+	};
+
+	it('keeps the spot under the pointer in place while zooming', () => {
+		const t = wide({ zoom: 1.5, ox: 0, oy: 0 });
+		const before = at(t, 0.8, 0.3);
+		const adjust = applyChange(t, { kind: 'zoom', factor: 1.4, at: { u: 0.8, v: 0.3 } }, opts);
+		const after = at({ ...t, adjust }, 0.8, 0.3);
+		expect(after.x).toBeCloseTo(before.x, 4);
+		expect(after.y).toBeCloseTo(before.y, 4);
+	});
+
+	it('lines the image up with an edge of the cell', () => {
+		const left = applyChange(wide(), { kind: 'align', x: -1, y: 0 }, opts);
+		const p = framePlace(200, 100, cell, 'fill', left, false);
+		expect(p.x).toBeCloseTo(0);
+		const right = applyChange(wide(), { kind: 'align', x: 1, y: 0 }, opts);
+		const q = framePlace(200, 100, cell, 'fill', right, false);
+		expect(q.x + q.w).toBeCloseTo(100);
+	});
+
+	it('aligns small images inside the cell in Fit too', () => {
+		const t: EditTarget = { adjust: { zoom: 1, ox: 0, oy: 0 }, width: 200, height: 100, area: cell };
+		const top = applyChange(t, { kind: 'align', x: 0, y: -1 }, { fit: 'fit', free: false });
+		expect(framePlace(200, 100, cell, 'fit', top, false).y).toBeCloseTo(0);
+	});
+
+	it('centers on the focal point, as far as the image allows', () => {
+		const p = framePlace(200, 100, cell, 'fill', { zoom: 1, ox: 0, oy: 0 }, false, { x: 0.6, y: 0.5 });
+		expect(p.x + 0.6 * p.w).toBeCloseTo(50);
+		const edge = framePlace(200, 100, cell, 'fill', { zoom: 1, ox: 0, oy: 0 }, false, { x: 1, y: 0.5 });
+		expect(edge.x + edge.w).toBeCloseTo(100);
+	});
+
+	it('reads the focal point from edits, with the center meaning none', () => {
+		expect(focusOf({})).toBeNull();
+		expect(focusOf({ focusX: 25 })).toEqual({ x: 0.25, y: 0.5 });
 	});
 });

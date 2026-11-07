@@ -2,7 +2,7 @@
  * An image's edits: the value of each parameter from the registry that differs from its initial
  * value. Leaving initial values out keeps stored edits small and makes "no edits" an empty object.
  */
-import { OPERATIONS, PARAMS, paramById, operationOf, type OperationGroup, type Param, type ParamValue } from './registry';
+import { OPERATIONS, PARAMS, bulkMode, paramById, operationOf, type OperationGroup, type Param, type ParamValue } from './registry';
 
 export type ImageEdits = Record<string, ParamValue>;
 
@@ -86,10 +86,12 @@ export function sharedEdit(all: (ImageEdits | undefined)[], id: string): ParamVa
 }
 
 /** The parameters of the given groups, as a full set of values (initial ones included), so
- * pasting them also resets what the source image left unchanged. */
+ * pasting them also resets what the source image left unchanged. Parameters that belong to one
+ * image only, such as a focal point, are left out. */
 export function pickGroups(edits: ImageEdits | undefined, groups: readonly OperationGroup[]): Record<string, ParamValue> {
 	const out: Record<string, ParamValue> = {};
-	for (const op of OPERATIONS) if (groups.includes(op.group)) for (const p of op.params) out[p.id] = valueOf(edits, p.id);
+	for (const op of OPERATIONS)
+		if (groups.includes(op.group)) for (const p of op.params) if (bulkMode(p) !== 'single') out[p.id] = valueOf(edits, p.id);
 	return out;
 }
 
@@ -102,4 +104,4 @@ export function resetGroups(groups: readonly OperationGroup[]): Record<string, P
 
 /** A stable text key for a set of edits, for caching rendered results. */
 export const editsKey = (edits: ImageEdits | undefined) =>
-	edits ? PARAMS.filter((p) => edits[p.id] !== undefined).map((p) => `${p.id}=${edits[p.id]}`).join('&') : '';
+	edits ? PARAMS.filter((p) => edits[p.id] !== undefined && operationOf(p.id)?.stage !== 'framing').map((p) => `${p.id}=${edits[p.id]}`).join('&') : '';
