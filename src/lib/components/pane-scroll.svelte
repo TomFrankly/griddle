@@ -31,7 +31,8 @@
 
 <div class="relative md:min-h-0 md:flex-1">
 	<div bind:this={el} class="pane-scroll md:absolute md:inset-0 md:overflow-y-auto" onscroll={update} data-testid={testid}>
-		<div bind:this={inner}>{@render children()}</div>
+		<!-- Room at the end so the help button in the corner never covers the last controls. -->
+		<div bind:this={inner} class="pb-20">{@render children()}</div>
 	</div>
 	<div class="pane-fade top hidden md:block" class:on={above} aria-hidden="true"></div>
 	<div class="pane-fade bottom hidden md:block" class:on={below} aria-hidden="true"></div>

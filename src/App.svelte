@@ -2789,7 +2789,7 @@
 							<Button size="sm" variant="outline" onclick={() => (style.captions.on = true)}>Turn on</Button>
 						</div>
 					{/if}
-					<div bind:this={paneList} class="min-h-0 flex-1 overflow-y-auto">{@render imageList('y')}</div>
+					<div bind:this={paneList} class="min-h-0 flex-1 overflow-y-auto pb-20">{@render imageList('y')}</div>
 				</aside>
 			{/if}
 		</div>
