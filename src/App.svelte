@@ -62,6 +62,7 @@
 	import UnlinkIcon from '@lucide/svelte/icons/unlink-2';
 	import { Toggle } from '$lib/components/ui/toggle/index.js';
 	import { autoGrid, computeLayout, randomSpans } from '$lib/grid';
+	import { computeMasonry, type Arrange, type FrameFill } from '$lib/masonry';
 	import DicesIcon from '@lucide/svelte/icons/dices';
 	import { captionBands, ensureCaptionFonts, fromPlain, plainText } from '$lib/captions';
 	import TextStyleFields from '$lib/components/text-style-fields.svelte';
@@ -135,6 +136,10 @@
 	let rows = $state(3);
 	let aspect = $state('1:1');
 	let customAspect = $state({ w: 3, h: 2 });
+	/** Equal cells in a grid, or justified rows / masonry columns that keep each photo's shape. */
+	let arrange = $state<Arrange>('grid');
+	let frameFill = $state<FrameFill>('trim');
+	let evenBottoms = $state(true);
 	let fit = $state<FitMode>('fill');
 	let gap = $state(24);
 	let padding = $state(24);
@@ -221,21 +226,40 @@
 		autoLayout && images.length ? autoGrid(spans, ratio || 1, frame ? frame.w / frame.h : 1) : { cols, rows }
 	);
 	const bands = $derived(captionBands(style.captions));
+	const masonry = $derived(arrange !== 'grid');
+	/** Each image's shape; empty slots use the cell shape. */
+	const aspects = $derived(images.map((i) => (hasImage(i) && i.width && i.height ? i.width / i.height : ratio || 1)));
 	const layout = $derived(
-		computeLayout({
-			count: Math.max(images.length, 1),
-			spans,
-			cols: grid.cols,
-			rows: grid.rows,
-			aspect: ratio,
-			longEdge,
-			frame: frame ? { w: frame.w, h: frame.h } : null,
-			gutter: gap,
-			padding,
-			bandAbove: bands.above,
-			bandBelow: bands.below
-		})
+		arrange === 'grid'
+			? computeLayout({
+					count: Math.max(images.length, 1),
+					spans,
+					cols: grid.cols,
+					rows: grid.rows,
+					aspect: ratio,
+					longEdge,
+					frame: frame ? { w: frame.w, h: frame.h } : null,
+					gutter: gap,
+					padding,
+					bandAbove: bands.above,
+					bandBelow: bands.below
+				})
+			: computeMasonry({
+					arrange,
+					aspects,
+					lines: autoLayout ? null : arrange === 'rows' ? rows : cols,
+					longEdge,
+					frame: frame ? { w: frame.w, h: frame.h } : null,
+					frameFill,
+					even: evenBottoms,
+					gutter: gap,
+					padding,
+					bandAbove: bands.above,
+					bandBelow: bands.below
+				})
 	);
+	/** The columns and rows the steppers show: the automatic grid, or what the masonry layout used. */
+	const shownGrid = $derived(masonry ? { cols: layout.cols, rows: layout.rows } : grid);
 	/** Manual columns and rows that leave some images out of the grid. */
 	const overflowing = $derived(!autoLayout && images.length > 0 && layout.used < images.length);
 	const unused = $derived(Math.max(0, images.length - layout.used));
@@ -244,17 +268,17 @@
 
 	/** The steppers show the automatic grid; changing one switches to manual. */
 	const colsBinding = {
-		get: () => grid.cols,
+		get: () => shownGrid.cols,
 		set: (v: number) => {
-			if (autoLayout) rows = grid.rows;
+			if (autoLayout) rows = shownGrid.rows;
 			autoLayout = false;
 			cols = v;
 		}
 	};
 	const rowsBinding = {
-		get: () => grid.rows,
+		get: () => shownGrid.rows,
 		set: (v: number) => {
-			if (autoLayout) cols = grid.cols;
+			if (autoLayout) cols = shownGrid.cols;
 			autoLayout = false;
 			rows = v;
 		}
@@ -275,7 +299,7 @@
 			bgId,
 			customColor,
 			ref: longEdge,
-			...(withCanvas ? { canvas: { size, customSize, aspect, customAspect: { ...customAspect }, autoLayout, cols, rows } } : {})
+			...(withCanvas ? { canvas: { size, customSize, aspect, customAspect: { ...customAspect }, autoLayout, cols, rows, arrange, frameFill, evenBottoms } } : {})
 		};
 	}
 	function useLook(look: Look) {
@@ -288,6 +312,9 @@
 			autoLayout = c.autoLayout;
 			cols = c.cols;
 			rows = c.rows;
+			arrange = c.arrange ?? 'grid';
+			frameFill = c.frameFill ?? 'trim';
+			evenBottoms = c.evenBottoms ?? true;
 			// The look's pixel values were saved at this size, so nothing needs scaling.
 			lastLongEdge = look.ref;
 		}
@@ -648,6 +675,9 @@
 	type Snapshot = {
 		images: { id: string; adjust: GridImage['adjust']; span: GridImage['span']; title: GridImage['title']; desc: GridImage['desc']; empty?: true }[];
 		autoLayout: boolean;
+		arrange?: Arrange;
+		frameFill?: FrameFill;
+		evenBottoms?: boolean;
 		quality: number;
 		cols: number;
 		rows: number;
@@ -684,6 +714,9 @@
 				...(i.file ? {} : { empty: true as const })
 			})),
 			autoLayout,
+			arrange,
+			frameFill,
+			evenBottoms,
 			quality,
 			cols,
 			rows,
@@ -916,6 +949,9 @@
 			return img ? [{ ...img, adjust: { ...adjust }, span: { ...span }, title: structuredClone(title), desc: structuredClone(desc) }] : [];
 		});
 		autoLayout = snap.autoLayout;
+		arrange = snap.arrange ?? 'grid';
+		frameFill = snap.frameFill ?? 'trim';
+		evenBottoms = snap.evenBottoms ?? true;
 		quality = snap.quality;
 		cols = snap.cols;
 		rows = snap.rows;
@@ -1105,6 +1141,7 @@
 	/** A grid of empty slots to plan the layout before adding any images. */
 	function startEmpty(c = cols, r = rows) {
 		if (showingExamples) clearAll();
+		arrange = 'grid';
 		autoLayout = false;
 		cols = c;
 		rows = r;
@@ -1147,6 +1184,7 @@
 		}
 		const spans = randomSpans(next.length, ratio || 1, frame ? frame.w / frame.h : 1);
 		next.forEach((img, i) => (img.span = spans[i]));
+		arrange = 'grid';
 		autoLayout = true;
 		images = next;
 	}
@@ -1896,17 +1934,19 @@
 								</Tooltip.Root>
 							{/if}
 						</h2>
-						<Tooltip.Root>
-							<Tooltip.Trigger>
-								{#snippet child({ props })}
-									<Button {...props} variant="ghost" size="sm" class="ml-auto h-7 px-2" onclick={randomBento} disabled={images.length < 2} data-testid="random-bento">
-										<DicesIcon />
-										Random
-									</Button>
-								{/snippet}
-							</Tooltip.Trigger>
-							<Tooltip.Content>Shuffle the images and make a few of them larger</Tooltip.Content>
-						</Tooltip.Root>
+						{#if !masonry}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									{#snippet child({ props })}
+										<Button {...props} variant="ghost" size="sm" class="ml-auto h-7 px-2" onclick={randomBento} disabled={images.length < 2} data-testid="random-bento">
+											<DicesIcon />
+											Random
+										</Button>
+									{/snippet}
+								</Tooltip.Trigger>
+								<Tooltip.Content>Shuffle the images and make a few of them larger</Tooltip.Content>
+							</Tooltip.Root>
+						{/if}
 						<label class="ml-2 flex cursor-pointer items-center gap-2 text-sm" for="auto-layout">
 							<span class="flex items-center gap-1.5">
 								Auto
@@ -1915,17 +1955,89 @@
 							<Switch id="auto-layout" size="sm" bind:checked={autoLayout} data-testid="auto-layout" />
 						</label>
 					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-sm" class:text-muted-foreground={autoLayout}>Columns</span>
-						<Stepper bind:value={colsBinding.get, colsBinding.set} label="Columns" />
-					</div>
-					<div class="flex items-center justify-between">
-						<span class="flex items-center gap-1.5 text-sm" class:text-muted-foreground={autoLayout}>
-							Rows
-							<InfoTip text="Rows without images are left out. A partly filled last row is centered. Hover an image to make it span more cells." />
-						</span>
-						<Stepper bind:value={rowsBinding.get, rowsBinding.set} label="Rows" />
-					</div>
+					<ToggleGroup.Root
+						type="single"
+						variant="outline"
+						size="sm"
+						class="w-full"
+						value={arrange}
+						onValueChange={(v) => v && (arrange = v as Arrange)}
+						data-testid="arrange"
+					>
+						<ToggleGroup.Item value="grid" class="flex-1" data-testid="arrange-grid">Grid</ToggleGroup.Item>
+						<ToggleGroup.Item value="rows" class="flex-1" data-testid="arrange-rows">Rows</ToggleGroup.Item>
+						<ToggleGroup.Item value="columns" class="flex-1" data-testid="arrange-columns">Columns</ToggleGroup.Item>
+					</ToggleGroup.Root>
+					{#if arrange !== 'grid'}
+						<p class="text-muted-foreground text-xs" data-testid="arrange-hint">
+							{arrange === 'rows'
+								? 'Each photo keeps its shape, and every row fills the width.'
+								: 'Each photo keeps its shape, stacked into the shortest column.'}
+						</p>
+					{/if}
+					{#if arrange !== 'rows'}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm" class:text-muted-foreground={autoLayout}>
+								Columns
+								{#if arrange === 'columns'}
+									<InfoTip text="Auto picks the number of columns that suits the canvas with the least cropping." />
+								{/if}
+							</span>
+							<Stepper bind:value={colsBinding.get, colsBinding.set} label="Columns" />
+						</div>
+					{/if}
+					{#if arrange !== 'columns'}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm" class:text-muted-foreground={autoLayout}>
+								Rows
+								<InfoTip
+									text={arrange === 'rows'
+										? 'Images stay in order and are split into rows of about the same height. Auto picks the number of rows that suits the canvas.'
+										: 'Rows without images are left out. A partly filled last row is centered. Hover an image to make it span more cells.'}
+								/>
+							</span>
+							<Stepper bind:value={rowsBinding.get, rowsBinding.set} label="Rows" />
+						</div>
+					{/if}
+					{#if arrange === 'columns' && !(frame && frameFill === 'trim')}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm">
+								Bottom edge
+								<InfoTip text="Even crops a little from photos in short and long columns so the bottoms line up. Ragged keeps every photo whole." />
+							</span>
+							<ToggleGroup.Root
+								type="single"
+								variant="outline"
+								size="sm"
+								value={evenBottoms ? 'even' : 'ragged'}
+								onValueChange={(v) => v && (evenBottoms = v === 'even')}
+								data-testid="bottom-edge"
+							>
+								<ToggleGroup.Item value="even" class="px-3">Even</ToggleGroup.Item>
+								<ToggleGroup.Item value="ragged" class="px-3">Ragged</ToggleGroup.Item>
+							</ToggleGroup.Root>
+						</div>
+					{/if}
+					{#if masonry && frame}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm">
+								Fixed size
+								<InfoTip text="Photos rarely add up to a fixed size exactly. Trim crops them a little more to fill it. Fit keeps their shapes and leaves a margin." />
+							</span>
+							<ToggleGroup.Root
+								type="single"
+								variant="outline"
+								size="sm"
+								value={frameFill}
+								onValueChange={(v) => v && (frameFill = v as FrameFill)}
+								data-testid="frame-fill"
+							>
+								<ToggleGroup.Item value="trim" class="px-3">Trim</ToggleGroup.Item>
+								<ToggleGroup.Item value="fit" class="px-3">Fit</ToggleGroup.Item>
+							</ToggleGroup.Root>
+						</div>
+					{/if}
+					{#if !masonry}
 					<div class="flex items-center justify-between">
 						<span class="text-sm">Cell shape</span>
 						<Select.Root type="single" bind:value={aspect}>
@@ -1946,6 +2058,7 @@
 								<NumberInput bind:value={customAspect.h} min={1} max={999} unit="" label="Cell height ratio" />
 							</div>
 						</div>
+					{/if}
 					{/if}
 					<div class="flex items-center justify-between">
 						<span class="flex items-center gap-1.5 text-sm">
@@ -2244,6 +2357,7 @@
 										onfiles={(files) => replaceAt(i, files)}
 										cols={layout.cols}
 										rows={Math.max(layout.rows, grid.rows)}
+										spannable={!masonry}
 										captions={style.captions}
 										onreorder={images.length > 1 ? (e) => startLift(e, i) : undefined}
 										lifted={lift?.from === i}
