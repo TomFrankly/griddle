@@ -38,10 +38,9 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
-	import InfoIcon from '@lucide/svelte/icons/info';
 	import InfoDialogs from '$lib/components/info-dialogs.svelte';
-	import FeedbackDialog from '$lib/components/feedback/feedback-dialog.svelte';
-	import { feedback, openFeedback } from '$lib/feedback/state.svelte';
+	import HelpChip from '$lib/components/feedback/help-chip.svelte';
+	import { feedback } from '$lib/feedback/state.svelte';
 	import StartPanel from '$lib/components/start-panel.svelte';
 	import WelcomeLetter from '$lib/components/welcome-letter.svelte';
 	import ArrowLeftRightIcon from '@lucide/svelte/icons/arrow-left-right';
@@ -1353,14 +1352,10 @@
 <ModeWatcher />
 <Toaster position="bottom-center" />
 <InfoDialogs bind:open={infoOpen} />
-<FeedbackDialog diagnostics={feedbackDiagnostics} />
+<HelpChip diagnostics={feedbackDiagnostics} onwelcome={() => (letterOpen = true)} onhelp={() => (infoOpen = 'help')} onprivacy={() => (infoOpen = 'privacy')} />
 {#if feedback.picking}
 	{#await import('$lib/components/feedback/feedback-picker.svelte') then { default: FeedbackPicker }}
 		<FeedbackPicker root={document.getElementById('app') ?? document.body} />
-	{/await}
-{:else if feedback.minimized}
-	{#await import('$lib/components/feedback/feedback-orb.svelte') then { default: FeedbackOrb }}
-		<FeedbackOrb />
 	{/await}
 {/if}
 <WelcomeLetter bind:open={letterOpen} />
@@ -1553,22 +1548,6 @@
 							<DropdownMenu.RadioItem value="dark">Dark</DropdownMenu.RadioItem>
 							<DropdownMenu.RadioItem value="system">System</DropdownMenu.RadioItem>
 						</DropdownMenu.RadioGroup>
-					</DropdownMenu.Content>
-				</DropdownMenu.Root>
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger>
-						{#snippet child({ props })}
-							<Button {...props} variant="ghost" size="icon-sm" aria-label="Help and privacy" data-testid="info">
-								<InfoIcon />
-							</Button>
-						{/snippet}
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Content align="end" class="w-40">
-						<DropdownMenu.Item onclick={() => (letterOpen = true)} data-testid="info-welcome">Welcome letter</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => (infoOpen = 'help')} data-testid="info-help">Help</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => (infoOpen = 'privacy')} data-testid="info-privacy">Privacy</DropdownMenu.Item>
-						<DropdownMenu.Separator />
-						<DropdownMenu.Item onclick={openFeedback} data-testid="info-feedback">Send feedback</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
 			</div>

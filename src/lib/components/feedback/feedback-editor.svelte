@@ -194,6 +194,7 @@
 					onemptychange?.(next);
 				}
 				feedback.draft = view.state.doc.toJSON();
+				feedback.hasDraft = !next;
 			},
 			handlePaste(_v, event) {
 				const files = event.clipboardData?.files;

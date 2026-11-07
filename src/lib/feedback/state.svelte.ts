@@ -1,45 +1,44 @@
 /**
- * Send feedback's state, shared by the dialog, the orb it minimizes to, and the picker
- * that lets someone point to a part of Griddle.
+ * The help chip's state: its panel (closed, the menu, or Send feedback), where the chip sits,
+ * and the feedback draft, which survives closing the panel until it's sent or discarded.
  */
 export type Picked = { shot: string; about: string };
 
 export const feedback = $state({
-	/** The dialog is showing. */
-	open: false,
-	/** Minimized to the orb; the draft is kept. */
-	minimized: false,
-	/** Pointing to a part of Griddle (the form is minimized meanwhile). */
+	/** What the chip's panel shows; closed leaves just the chip. */
+	panel: 'closed' as 'closed' | 'menu' | 'feedback',
+	/** Pointing to a part of Griddle (the panel steps aside meanwhile). */
 	picking: false,
-	/** Where the orb was dragged to (left, top in px); null: the start spot. */
+	/** Where the chip was dragged to (left, top in px); null: the start spot. */
 	pos: null as { x: number; y: number } | null,
 	/** Parts picked while the form was away; the message box adds each when it opens. */
 	picked: [] as Picked[],
-	/** The message as last edited (ProseMirror JSON), kept while minimized. */
-	draft: null as Record<string, unknown> | null
+	/** The message as last edited (ProseMirror JSON), kept while the panel is closed. */
+	draft: null as Record<string, unknown> | null,
+	/** The draft has words or pictures, so the chip shows a dot. */
+	hasDraft: false
 });
 
 export function openFeedback() {
 	feedback.picking = false;
-	feedback.minimized = false;
-	feedback.open = true;
+	feedback.panel = 'feedback';
 }
 
-export function minimizeFeedback() {
-	feedback.open = false;
-	feedback.minimized = true;
+/** Tuck the panel into the chip, keeping any draft. */
+export function minimizePanel() {
+	feedback.panel = 'closed';
 }
 
 export function pickPart() {
-	minimizeFeedback();
+	feedback.panel = 'closed';
 	feedback.picking = true;
 }
 
-/** Closed for good (sent, or cancelled): the draft goes. */
+/** Sent, or thrown away: the draft goes. */
 export function discardFeedback() {
-	feedback.open = false;
-	feedback.minimized = false;
+	feedback.panel = 'closed';
 	feedback.picking = false;
 	feedback.picked = [];
 	feedback.draft = null;
+	feedback.hasDraft = false;
 }
