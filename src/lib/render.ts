@@ -123,6 +123,8 @@ export type CellStyle = {
 	corners: { on: boolean; radius: number };
 	border: { on: boolean; width: number; color: string; opacity: number };
 	shadow: { on: boolean; strength: number; distance: number; softness: number };
+	/** Darkens (or tints) each frame toward its edges, over whatever the cell shows. Percentages. */
+	vignette: { on: boolean; strength: number; size: number; softness: number; color: string };
 	lines: LineStyle;
 	/** A box behind each image, filling its cell. Shows through transparent images. */
 	fill: { on: boolean; bgId: string; color: string; opacity: number; padding: number };
@@ -133,6 +135,7 @@ export const DEFAULT_STYLE: CellStyle = {
 	corners: { on: false, radius: 12 },
 	border: { on: false, width: 4, color: '#ffffff', opacity: 100 },
 	shadow: { on: false, strength: 35, distance: 8, softness: 24 },
+	vignette: { on: false, strength: 45, size: 50, softness: 60, color: '#000000' },
 	lines: DEFAULT_LINES,
 	fill: { on: false, bgId: 'custom', color: '#f0f0f0', opacity: 100, padding: 0 },
 	captions: DEFAULT_CAPTIONS
@@ -301,6 +304,31 @@ function drawImage(ctx: Ctx, it: PlanItem, source: CanvasImageSource, inset = 0)
 	ctx.restore();
 }
 
+/** A frame vignette over one cell: an elliptical fade from clear in the middle to the vignette
+ * color at the edges, shaped like the cell and cut to its corners. */
+function drawVignette(ctx: Ctx, it: PlanItem, style: CellStyle) {
+	const v = style.vignette;
+	if (!v?.on || v.strength <= 0) return;
+	const b = it.visible;
+	if (b.w <= 0 || b.h <= 0) return;
+	ctx.save();
+	shape(ctx, b, it.radius);
+	ctx.clip();
+	// Drawn as a circle on a stretched canvas, so it follows the cell's shape.
+	ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+	ctx.scale(b.w / 2, b.h / 2);
+	const outer = Math.SQRT2;
+	const inner = Math.max(0, Math.min(outer - 0.01, outer * (1 - v.size / 100) * (1 - v.softness / 200)));
+	const edge = Math.max(inner + 0.01, Math.min(outer, inner + (outer - inner) * Math.max(0.05, v.softness / 100)));
+	const g = ctx.createRadialGradient(0, 0, inner, 0, 0, outer);
+	g.addColorStop(0, withAlpha(v.color, 0));
+	g.addColorStop(Math.min(1, (edge - inner) / (outer - inner)), withAlpha(v.color, Math.min(100, v.strength)));
+	g.addColorStop(1, withAlpha(v.color, Math.min(100, v.strength)));
+	ctx.fillStyle = g;
+	ctx.fillRect(-1, -1, 2, 2);
+	ctx.restore();
+}
+
 /** How far under an opaque border the image can be cut back. */
 const borderInset = (style: CellStyle, scale: number) =>
 	style.border.on && style.border.opacity >= 100 ? Math.min(style.border.width / 2, 1.5 / scale) : 0;
@@ -354,7 +382,9 @@ export function drawGrid(
 		if (layer === 'image')
 			items.forEach((it, i) => {
 				const d = imgs[i];
-				if (it && d?.source) drawImage(ctx, it, editedPreview(d.source as Editable, d.edits), inset);
+				if (!it || !d?.source) return;
+				drawImage(ctx, it, editedPreview(d.source as Editable, d.edits), inset);
+				drawVignette(ctx, it, opts.style);
 			});
 		else if (layer === 'fade') drawFades(ctx, items, imgs, opts.style);
 		else drawCaptions(ctx, layout.cells, imgs, opts.style.captions, opts.scale);
@@ -445,6 +475,7 @@ export async function renderFull(
 				if (!it || !hasImage(img)) continue;
 				const { source, done } = await decodeEdited(img);
 				drawImage(ctx, it, source, borderInset(opts.style, 1));
+				drawVignette(ctx, it, opts.style);
 				done();
 			}
 	}
@@ -519,6 +550,7 @@ export async function renderPsd(layout: Layout, images: GridImage[], opts: Rende
 		for (const l of order) {
 			if (l === 'image') {
 				if (it && bmp) add(layer('Image', it.clip, (ctx) => drawImage(ctx, it, bmp, borderInset(st, 1))));
+				if (it && bmp && st.vignette?.on) add(layer('Vignette', it.visible, (ctx) => drawVignette(ctx, it, st)));
 			} else if (!c.on) continue;
 			else if (l === 'fade') {
 				if (it && c.fade.on) add(layer('Caption fade', cell, (ctx) => drawFades(ctx, [it], [img], st)));
@@ -586,7 +618,10 @@ export async function renderCells(
 		drawFills(ctx, [it], style, opts.cellBackground);
 		const { source, done } = await decodeEdited(img);
 		for (const layer of layerOrder(style)) {
-			if (layer === 'image') drawImage(ctx, it, source, borderInset(style, 1));
+			if (layer === 'image') {
+				drawImage(ctx, it, source, borderInset(style, 1));
+				drawVignette(ctx, it, style);
+			}
 			else if (!caps) continue;
 			else if (layer === 'fade') drawFades(ctx, [it], [images[i]], style);
 			else drawCaptions(ctx, [it.cell], [images[i]], style.captions, 1);

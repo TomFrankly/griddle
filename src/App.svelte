@@ -2056,6 +2056,12 @@
 					<SliderField label="Distance" bind:value={style.shadow.distance} max={spaceMax} />
 					<SliderField label="Softness" bind:value={style.shadow.softness} max={spaceMax * 2} />
 				</ToggleSection>
+				<ToggleSection title="Vignette" bind:on={style.vignette.on}>
+					<SliderField label="Strength" bind:value={style.vignette.strength} unit="%" />
+					<SliderField label="Size" bind:value={style.vignette.size} unit="%" />
+					<SliderField label="Softness" bind:value={style.vignette.softness} unit="%" />
+					<ColorField label="Color" bind:value={style.vignette.color} />
+				</ToggleSection>
 				<ToggleSection title="Divider lines" bind:on={style.lines.on}>
 					<LineStyleFields bind:value={style.lines} maxWidth={Math.max(20, Math.round(longEdge / 60))} {spaceMax} />
 				</ToggleSection>
