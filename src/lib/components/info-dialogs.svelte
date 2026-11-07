@@ -38,7 +38,7 @@
 			</li>
 			<li>
 				<span class="font-medium">5. Export.</span>
-				Download a PNG, JPG, WebP or layered PSD, save each cell as its own PNG, or copy the grid to paste anywhere.
+				Download a PNG, JPG, WebP or layered PSD, save each cell as its own PNG, or copy the grid to paste anywhere. Every grid is saved in this browser as you work, so Grids in the top bar can bring back an earlier one.
 			</li>
 		</ol>
 		<div class="space-y-1.5 border-t pt-3 text-sm">
@@ -69,8 +69,8 @@
 		<div class="space-y-3 text-sm">
 			<p>
 				Griddle runs entirely in your browser. Your images, captions and settings are never uploaded. They're kept in this
-				browser's own storage so your grid is still here after a refresh, and removing your images clears them. Exports are
-				made on your device.
+				browser's own storage, so your grid is still here after a refresh and earlier grids can be opened again from Grids.
+				Deleting a grid there, or clearing this site's data, removes them. Exports are made on your device.
 			</p>
 			<p>There are no accounts, no ads and no tracking cookies. A few things do use the network:</p>
 			<ul class="list-disc space-y-2 pl-5">

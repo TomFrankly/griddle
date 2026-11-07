@@ -9,16 +9,19 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { BUILT_IN_LOOKS, loadLooks, saveLooks, type Look, type NamedLook } from '$lib/looks';
 
-	let { current, onapply }: { current: () => Look; onapply: (look: Look) => void } = $props();
+	import { Switch } from '$lib/components/ui/switch/index.js';
+
+	let { current, onapply }: { current: (withCanvas: boolean) => Look; onapply: (look: Look) => void } = $props();
 
 	let open = $state(false);
 	let saved = $state<NamedLook[]>(loadLooks());
 	let name = $state('');
+	let withCanvas = $state(true);
 
 	function save(e: SubmitEvent) {
 		e.preventDefault();
 		const n = name.trim() || `Look ${saved.length + 1}`;
-		const look = current();
+		const look = current(withCanvas);
 		const existing = saved.findIndex((l) => l.name.toLowerCase() === n.toLowerCase());
 		const entry = { id: existing >= 0 ? saved[existing].id : `look-${Date.now()}`, name: n, look };
 		saved = existing >= 0 ? saved.map((l, i) => (i === existing ? entry : l)) : [...saved, entry];
@@ -77,7 +80,7 @@
 				{#each saved as l (l.id)}{@render item(l, true)}{/each}
 			{/if}
 		</div>
-		<form class="flex gap-1.5 border-t p-2" onsubmit={save}>
+		<form class="flex flex-wrap gap-1.5 border-t p-2" onsubmit={save}>
 			<input
 				class="border-input placeholder:text-muted-foreground focus-visible:border-ring h-8 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-sm outline-none"
 				placeholder="Name this look"
@@ -86,6 +89,10 @@
 				data-testid="look-name"
 			/>
 			<Button type="submit" size="sm" data-testid="look-save">Save</Button>
+			<label class="text-muted-foreground flex w-full cursor-pointer items-center justify-between gap-2 px-0.5 pt-1 text-xs" for="look-canvas">
+				Include canvas size and layout
+				<Switch id="look-canvas" size="sm" bind:checked={withCanvas} data-testid="look-canvas" />
+			</label>
 		</form>
 	</Popover.Content>
 </Popover.Root>

@@ -92,7 +92,7 @@
 			<Button variant="outline" size="sm" onclick={onsample} {disabled} data-testid="load-samples">Open sample</Button>
 		</div>
 	</div>
-	{#if extra}<div class="mt-4">{@render extra()}</div>{/if}
+	{#if extra}<div class="mt-8 flex w-full flex-col items-center gap-4">{@render extra()}</div>{/if}
 </div>
 
 <style>

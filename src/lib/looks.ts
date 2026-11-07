@@ -15,6 +15,19 @@ export type Look = {
 	customColor: string;
 	/** The output's long edge when the look was saved. */
 	ref: number;
+	/** Saved looks can also carry the canvas size and grid layout, so every grid made with
+	 * them comes out the same. */
+	canvas?: LookCanvas;
+};
+
+export type LookCanvas = {
+	size: string;
+	customSize: number;
+	aspect: string;
+	customAspect: { w: number; h: number };
+	autoLayout: boolean;
+	cols: number;
+	rows: number;
 };
 
 export type NamedLook = { id: string; name: string; look: Look };
