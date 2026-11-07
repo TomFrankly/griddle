@@ -80,6 +80,12 @@
 					sees your IP address and the font's name, nothing else.
 				</li>
 				<li>
+					<span class="font-medium">Feedback.</span>
+					Only when you send feedback: your message, the screenshots you add and, if you leave it on, diagnostic info (Griddle's
+					version, your browser, window size and grid settings) are saved in the maker's Notion workspace. Nothing else from
+					Griddle is sent, and never your grid's images unless you add them as screenshots.
+				</li>
+				<li>
 					<span class="font-medium">Updates.</span>
 					Griddle checks for a newer version now and then, so it can offer a reload.
 				</li>

@@ -154,3 +154,6 @@ dist-single
 .DS_Store
 *.local
 Sample Images/
+
+# Wrangler local secrets
+.dev.vars

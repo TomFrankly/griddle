@@ -38,8 +38,9 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
-	import InfoIcon from '@lucide/svelte/icons/info';
 	import InfoDialogs from '$lib/components/info-dialogs.svelte';
+	import HelpChip from '$lib/components/feedback/help-chip.svelte';
+	import { feedback } from '$lib/feedback/state.svelte';
 	import StartPanel from '$lib/components/start-panel.svelte';
 	import WelcomeLetter from '$lib/components/welcome-letter.svelte';
 	import ArrowLeftRightIcon from '@lucide/svelte/icons/arrow-left-right';
@@ -83,6 +84,8 @@
 	} from '$lib/render';
 	import { fillSlots } from '$lib/slots';
 	import SquarePlusIcon from '@lucide/svelte/icons/square-plus';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import NumberInput from '$lib/components/number-input.svelte';
 	import { PAINT_PRESETS } from '$lib/paint/presets';
 
 	const ASPECTS = [
@@ -95,7 +98,8 @@
 		{ value: '9:16', label: '9:16', ratio: 9 / 16 },
 		{ value: '5:4', label: '5:4', ratio: 5 / 4 },
 		{ value: '4:5', label: '4:5', ratio: 4 / 5 },
-		{ value: '21:9', label: '21:9', ratio: 21 / 9 }
+		{ value: '21:9', label: '21:9', ratio: 21 / 9 },
+		{ value: 'custom', label: 'Custom', ratio: 1 }
 	];
 	const FILL_FRAME = { value: 'auto', label: 'Fill frame', ratio: 0 };
 
@@ -125,6 +129,7 @@
 	let cols = $state(3);
 	let rows = $state(3);
 	let aspect = $state('1:1');
+	let customAspect = $state({ w: 3, h: 2 });
 	let fit = $state<FitMode>('fill');
 	let gap = $state(24);
 	let padding = $state(24);
@@ -160,7 +165,15 @@
 
 	const frame = $derived(FRAMES.find((f) => f.value === size) ?? null);
 	const aspectOptions = $derived(frame ? [FILL_FRAME, ...ASPECTS] : ASPECTS);
-	const ratio = $derived(aspect === 'auto' ? (frame ? 0 : 1) : (ASPECTS.find((a) => a.value === aspect)?.ratio ?? 1));
+	const ratio = $derived(
+		aspect === 'auto'
+			? frame
+				? 0
+				: 1
+			: aspect === 'custom'
+				? customAspect.w / customAspect.h
+				: (ASPECTS.find((a) => a.value === aspect)?.ratio ?? 1)
+	);
 	const longEdge = $derived(frame ? Math.max(frame.w, frame.h) : size === 'custom' ? customSize : Number(size));
 	const spaceMax = $derived(Math.max(40, Math.round(longEdge / 10)));
 	const sizeLabel = $derived(frame ? frame.short : (SIZES.find((x) => x.value === size)?.label ?? size));
@@ -218,6 +231,8 @@
 			bandBelow: bands.below
 		})
 	);
+	/** Manual columns and rows that leave some images out of the grid. */
+	const overflowing = $derived(!autoLayout && images.length > 0 && layout.used < images.length);
 	const unused = $derived(Math.max(0, images.length - layout.used));
 	const filled = $derived(images.filter(hasImage).length);
 	const emptyCount = $derived(images.length - filled);
@@ -524,6 +539,7 @@
 		cols: number;
 		rows: number;
 		aspect: string;
+		customAspect: { w: number; h: number };
 		fit: FitMode;
 		gap: number;
 		padding: number;
@@ -557,6 +573,7 @@
 			cols,
 			rows,
 			aspect,
+			customAspect: { ...customAspect },
 			fit,
 			gap,
 			padding,
@@ -679,6 +696,7 @@
 		cols = snap.cols;
 		rows = snap.rows;
 		aspect = snap.aspect;
+		customAspect = { ...(snap.customAspect ?? { w: 3, h: 2 }) };
 		fit = snap.fit;
 		gap = snap.gap;
 		padding = snap.padding;
@@ -1131,6 +1149,20 @@
 		(e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
 	}
 	let exportFormat = $state<ExportFormat | 'psd'>('png');
+
+	/** What Send feedback's "Include diagnostic info" adds. Settings only, never images or captions. */
+	function feedbackDiagnostics(): string {
+		const filled = images.filter((i) => i.file).length;
+		return [
+			`Build: ${import.meta.env.VITE_BUILD_ID ?? 'dev'}`,
+			`Browser: ${navigator.userAgent}`,
+			`Window: ${innerWidth}×${innerHeight} @${devicePixelRatio}x`,
+			`Theme: ${document.documentElement.classList.contains('dark') ? 'dark' : 'light'}`,
+			`Grid: ${layout.cols}×${layout.rows}, ${layout.width}×${layout.height} px, ${filled} image${filled === 1 ? '' : 's'}, ${images.length - filled} empty, auto layout ${autoLayout ? 'on' : 'off'}`,
+			`Export: ${exportFormat}`,
+			`Tab: ${typeof location !== 'undefined' ? location.pathname : ''}`
+		].join('\n');
+	}
 	const FORMATS: { id: ExportFormat | 'psd'; label: string }[] = [
 		{ id: 'png', label: 'PNG' },
 		{ id: 'jpeg', label: 'JPG' },
@@ -1337,16 +1369,21 @@
 <ModeWatcher />
 <Toaster position="bottom-center" />
 <InfoDialogs bind:open={infoOpen} />
+<HelpChip diagnostics={feedbackDiagnostics} onwelcome={() => (letterOpen = true)} onhelp={() => (infoOpen = 'help')} onprivacy={() => (infoOpen = 'privacy')} />
+{#if feedback.picking}
+	{#await import('$lib/components/feedback/feedback-picker.svelte') then { default: FeedbackPicker }}
+		<FeedbackPicker root={document.getElementById('app') ?? document.body} />
+	{/await}
+{/if}
 <WelcomeLetter bind:open={letterOpen} />
 
 {#snippet dockHeader()}
-	<div class="flex h-9 items-center gap-1 border-b px-3">
-		<span class="text-muted-foreground text-xs tabular-nums">
-			{#if showingExamples}Example images ·
-				<button type="button" class="text-foreground underline-offset-2 hover:underline" onclick={() => fileInput.click()}>Add your own</button>
+	<div class="flex h-[49px] shrink-0 items-center gap-3 border-b px-4">
+		<span class="text-muted-foreground min-w-0 text-xs leading-tight tabular-nums">
+			{#if showingExamples}<span class="whitespace-nowrap">Example images</span>{#if dockSide === 'bottom'}<span> · </span>{:else}<br />{/if}<button type="button" class="text-foreground whitespace-nowrap underline-offset-2 hover:underline" onclick={() => fileInput.click()}>Add your own</button>
 			{:else}{filled} image{filled === 1 ? '' : 's'}{#if emptyCount}<span>&nbsp;· {emptyCount} empty</span>{/if}{/if}{#if unused && !showingExamples}<span> · {unused} not used</span>{/if}
 		</span>
-		<div class="ml-auto flex items-center">
+		<div class="ml-auto flex shrink-0 items-center gap-1">
 			{@render iconAction('Add an empty slot', SquarePlusIcon, () => addSlots())}
 			{@render iconAction('Reset all crops', RotateCcwIcon, resetAll)}
 			{@render iconAction('Sort by name', ArrowDownAZIcon, sortByName)}
@@ -1529,20 +1566,6 @@
 						</DropdownMenu.RadioGroup>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger>
-						{#snippet child({ props })}
-							<Button {...props} variant="ghost" size="icon-sm" aria-label="Help and privacy" data-testid="info">
-								<InfoIcon />
-							</Button>
-						{/snippet}
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Content align="end" class="w-40">
-						<DropdownMenu.Item onclick={() => (letterOpen = true)} data-testid="info-welcome">Welcome letter</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => (infoOpen = 'help')} data-testid="info-help">Help</DropdownMenu.Item>
-						<DropdownMenu.Item onclick={() => (infoOpen = 'privacy')} data-testid="info-privacy">Privacy</DropdownMenu.Item>
-					</DropdownMenu.Content>
-				</DropdownMenu.Root>
 			</div>
 		</header>
 
@@ -1605,7 +1628,23 @@
 
 				<section class="pane-section space-y-3">
 					<div class="flex items-center justify-between">
-						<h2 class="pane-title">Grid</h2>
+						<h2 class="pane-title flex items-center gap-1.5">
+							Grid
+							{#if overflowing}
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										{#snippet child({ props })}
+											<button type="button" {...props} class="text-warning flex cursor-default" aria-label="Not every image fits" data-testid="grid-overflow">
+												<TriangleAlertIcon class="size-4" />
+											</button>
+										{/snippet}
+									</Tooltip.Trigger>
+									<Tooltip.Content class="max-w-64">
+										These columns and rows fit {layout.used} of your {images.length} images. Add more, or turn on Auto, to show the rest.
+									</Tooltip.Content>
+								</Tooltip.Root>
+							{/if}
+						</h2>
 						<Tooltip.Root>
 							<Tooltip.Trigger>
 								{#snippet child({ props })}
@@ -1647,6 +1686,16 @@
 							</Select.Content>
 						</Select.Root>
 					</div>
+					{#if aspect === 'custom'}
+						<div class="flex items-center justify-between" data-testid="custom-aspect">
+							<span class="text-sm">Width to height</span>
+							<div class="flex items-center">
+								<NumberInput bind:value={customAspect.w} min={1} max={999} unit="" label="Cell width ratio" />
+								<span class="text-muted-foreground px-0.5 text-sm">:</span>
+								<NumberInput bind:value={customAspect.h} min={1} max={999} unit="" label="Cell height ratio" />
+							</div>
+						</div>
+					{/if}
 					<div class="flex items-center justify-between">
 						<span class="flex items-center gap-1.5 text-sm">
 							Images
@@ -1859,7 +1908,7 @@
 			<main class="flex min-w-0 flex-col md:min-h-0 md:flex-1">
 				{#if showingExamples && !welcomeDismissed}
 					<div class="flex min-h-[49px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-1.5" data-testid="welcome">
-						<p class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm">
+						<p class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm leading-tight">
 							<span class="font-medium">This is the sample grid.</span>
 							<span class="text-muted-foreground">Drag in images to replace it, or start from scratch.</span>
 						</p>
