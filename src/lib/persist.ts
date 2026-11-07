@@ -6,6 +6,8 @@
 const SETTINGS_KEY = 'griddle:session';
 const DB = 'griddle';
 const STORE = 'images';
+/** Saved grids for the grid library. Their images live in STORE, shared by id. */
+const GRIDS = 'grids';
 
 export function loadSettings<T>(): T | null {
 	try {
@@ -27,20 +29,28 @@ export function saveSettings(value: unknown) {
 let dbPromise: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
 	dbPromise ??= new Promise((resolve, reject) => {
-		const req = indexedDB.open(DB, 1);
-		req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+		const req = indexedDB.open(DB, 2);
+		req.onupgradeneeded = () => {
+			const d = req.result;
+			if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE);
+			if (!d.objectStoreNames.contains(GRIDS)) d.createObjectStore(GRIDS, { keyPath: 'id' });
+		};
 		req.onsuccess = () => resolve(req.result);
 		req.onerror = () => reject(req.error);
 	});
 	return dbPromise;
 }
 
-function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T> | void): Promise<T | undefined> {
+function run<T>(
+	mode: IDBTransactionMode,
+	fn: (s: IDBObjectStore) => IDBRequest<T> | void,
+	store: string = STORE
+): Promise<T | undefined> {
 	return db().then(
 		(d) =>
 			new Promise((resolve, reject) => {
-				const tx = d.transaction(STORE, mode);
-				const req = fn(tx.objectStore(STORE));
+				const tx = d.transaction(store, mode);
+				const req = fn(tx.objectStore(store));
 				tx.oncomplete = () => resolve(req ? req.result : undefined);
 				tx.onerror = () => reject(tx.error);
 			})
@@ -104,12 +114,13 @@ export async function storeFile(id: string, file: File) {
 	}
 }
 
-/** Makes the store hold exactly these image files. */
+/** Makes the store hold these image files, plus any that a saved grid still uses. */
 export async function syncFiles(files: { id: string; file: File }[]) {
 	try {
 		const keys = ((await run<IDBValidKey[]>('readonly', (s) => s.getAllKeys())) ?? []).map(String);
 		keys.forEach((k) => !isBgKey(k) && stored.add(k));
 		const want = new Set(files.map((f) => f.id));
+		for (const g of await listGrids()) for (const id of g.imageIds) want.add(id);
 		await run('readwrite', (s) => {
 			for (const k of keys) if (!want.has(k) && !isBgKey(k)) s.delete(k);
 			for (const f of files) if (!stored.has(f.id)) s.put(f.file, f.id);
@@ -118,5 +129,80 @@ export async function syncFiles(files: { id: string; file: File }[]) {
 		want.forEach((k) => stored.add(k));
 	} catch {
 		// Ignore: storage is a convenience.
+	}
+}
+
+/** A grid in the library: its settings snapshot, a thumbnail, and its own background images. */
+export type GridRecord<S = unknown> = {
+	id: string;
+	name: string;
+	created: number;
+	updated: number;
+	pinned: boolean;
+	/** Images in the grid, not counting empty slots. */
+	count: number;
+	/** Ids of the image files it uses, kept in the image store. */
+	imageIds: string[];
+	thumb: Blob | null;
+	snap: S;
+	background: File | null;
+	cellBackground: File | null;
+};
+
+/** How many unpinned grids the library keeps; older ones are dropped first. */
+export const LIBRARY_MAX = 30;
+
+export async function listGrids<S>(): Promise<GridRecord<S>[]> {
+	try {
+		const all = (await run<GridRecord<S>[]>('readonly', (s) => s.getAll(), GRIDS)) ?? [];
+		return all.sort((a, b) => b.updated - a.updated);
+	} catch {
+		return [];
+	}
+}
+
+export async function getGrid<S>(id: string): Promise<GridRecord<S> | undefined> {
+	try {
+		return await run<GridRecord<S>>('readonly', (s) => s.get(id), GRIDS);
+	} catch {
+		return undefined;
+	}
+}
+
+/** Saves a grid, then drops the oldest unpinned ones past the limit. */
+export async function putGrid(record: GridRecord) {
+	try {
+		await run('readwrite', (s) => {
+			s.put(record);
+		}, GRIDS);
+		const all = await listGrids();
+		const extra = all.filter((g) => !g.pinned).slice(LIBRARY_MAX);
+		if (extra.length) await run('readwrite', (s) => extra.forEach((g) => s.delete(g.id)), GRIDS);
+	} catch {
+		// Ignore: the library is a convenience.
+	}
+}
+
+export async function updateGrid(id: string, patch: Partial<Pick<GridRecord, 'name' | 'pinned'>>) {
+	const g = await getGrid(id);
+	if (g) await putGrid({ ...g, ...patch });
+}
+
+export async function deleteGrid(id: string) {
+	try {
+		await run('readwrite', (s) => {
+			s.delete(id);
+		}, GRIDS);
+	} catch {
+		// Ignore.
+	}
+}
+
+/** Asks the browser not to clear Griddle's storage when space runs low. */
+export async function keepStorage() {
+	try {
+		if (navigator.storage?.persisted && !(await navigator.storage.persisted())) await navigator.storage.persist?.();
+	} catch {
+		// Not every browser supports it.
 	}
 }

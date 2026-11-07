@@ -25,6 +25,9 @@
 	import ToggleSection from '$lib/components/toggle-section.svelte';
 	import PaneScroll from '$lib/components/pane-scroll.svelte';
 	import ImagePane from '$lib/components/image-pane.svelte';
+	import GridLibrary from '$lib/components/grid-library.svelte';
+	import RecentGrids from '$lib/components/recent-grids.svelte';
+	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import { applyChange, copySettings, type CellChange, type CellSettings } from '$lib/cell-edits';
 	import LineStyleFields from '$lib/components/line-style-fields.svelte';
 	import BackgroundPicker from '$lib/components/background-picker.svelte';
@@ -64,7 +67,7 @@
 	import TextStyleFields from '$lib/components/text-style-fields.svelte';
 	import LooksMenu from '$lib/components/looks-menu.svelte';
 	import { applyLook, scaleStyle, withDefaults, type Look } from '$lib/looks';
-	import { loadBackground, loadFiles, loadSettings, saveBackground, saveSettings, storeFile, syncFiles } from '$lib/persist';
+	import { loadBackground, loadFiles, loadSettings, saveBackground, saveSettings, storeFile, syncFiles, getGrid, putGrid } from '$lib/persist';
 	import {
 		canvasToBlob,
 		decode,
@@ -262,11 +265,33 @@
 		ensureCaptionFonts(c).then(() => fontTick++);
 	});
 
-	function currentLook(): Look {
-		return { gap, padding, linkPadding, fit, style: $state.snapshot(style) as CellStyle, bgId, customColor, ref: longEdge };
+	function currentLook(withCanvas = false): Look {
+		return {
+			gap,
+			padding,
+			linkPadding,
+			fit,
+			style: $state.snapshot(style) as CellStyle,
+			bgId,
+			customColor,
+			ref: longEdge,
+			...(withCanvas ? { canvas: { size, customSize, aspect, customAspect: { ...customAspect }, autoLayout, cols, rows } } : {})
+		};
 	}
 	function useLook(look: Look) {
-		const v = applyLook(look, longEdge);
+		if (look.canvas) {
+			const c = look.canvas;
+			size = c.size;
+			customSize = c.customSize;
+			aspect = c.aspect;
+			customAspect = { ...c.customAspect };
+			autoLayout = c.autoLayout;
+			cols = c.cols;
+			rows = c.rows;
+			// The look's pixel values were saved at this size, so nothing needs scaling.
+			lastLongEdge = look.ref;
+		}
+		const v = applyLook(look, look.canvas ? look.ref : longEdge);
 		gap = v.gap;
 		padding = v.padding;
 		linkPadding = v.linkPadding;
@@ -638,6 +663,8 @@
 		size: string;
 		customSize: number;
 		showingExamples: boolean;
+		/** Which library entry this grid saves to. */
+		gridId?: string;
 	};
 	const HISTORY_MAX = 100;
 	const pool = new Map<string, GridImage>();
@@ -671,7 +698,8 @@
 			style: $state.snapshot(style),
 			size,
 			customSize,
-			showingExamples
+			showingExamples,
+			gridId
 		};
 	}
 
@@ -683,6 +711,112 @@
 		future = [];
 		prune();
 		persist();
+	}
+
+	// The grid library: every grid you make is saved under its own id as you work, with a
+	// thumbnail, so it can be opened again after starting another one.
+	const newGridId = () => `grid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+	let gridId = $state(newGridId());
+	let libraryTick = $state(0);
+	let libraryOpen = $state(false);
+	/** Library writes run in order, and file clean-up waits for them, so files a saved grid
+	 * still needs are never removed before its entry is written. */
+	let libraryQueue: Promise<unknown> = Promise.resolve();
+	/** Saves the current grid to the library, unless it has no images of your own. */
+	function saveToLibrary() {
+		const snap = current?.snap ?? capture();
+		if (snap.showingExamples || snap.gridId !== gridId) return;
+		const ids = snap.images.filter((i) => !i.empty && pool.get(i.id)?.file).map((i) => i.id);
+		if (!ids.length) return;
+		const id = gridId;
+		const thumb = gridThumb();
+		const bg = snap.bgId === 'image' ? (bgImage?.file ?? null) : null;
+		const cellBg = snap.style.fill.on && snap.style.fill.bgId === 'image' ? (cellImage?.file ?? null) : null;
+		libraryQueue = libraryQueue.then(async () => {
+			const old = await getGrid<Snapshot>(id);
+			// Make sure the files are stored before the library points at them.
+			for (const i of ids) {
+				const f = pool.get(i)?.file;
+				if (f) await storeFile(i, f);
+			}
+			await putGrid({
+				id,
+				name: old?.name ?? defaultGridName(),
+				created: old?.created ?? Date.now(),
+				updated: Date.now(),
+				pinned: old?.pinned ?? false,
+				count: ids.length,
+				imageIds: ids,
+				thumb: (await thumb) ?? old?.thumb ?? null,
+				snap: $state.snapshot(snap) as Snapshot,
+				background: bg,
+				cellBackground: cellBg
+			});
+			libraryTick++;
+		});
+	}
+	function defaultGridName() {
+		return new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+	}
+	/** A small JPEG of the grid for the library. */
+	function gridThumb(): Promise<Blob | null> {
+		try {
+			const max = 360;
+			const k = max / Math.max(layout.width, layout.height);
+			const c = document.createElement('canvas');
+			c.width = Math.max(1, Math.round(layout.width * k));
+			c.height = Math.max(1, Math.round(layout.height * k));
+			const ctx = c.getContext('2d');
+			if (!ctx) return Promise.resolve(null);
+			const imgs = images;
+			drawGrid(ctx, layout, (i) => {
+				const img = imgs[i];
+				return img ? { source: img.thumb, width: img.width, height: img.height, adjust: { ...img.adjust }, title: $state.snapshot(img.title), desc: $state.snapshot(img.desc) } : null;
+			}, { background, cellBackground, fit, style: $state.snapshot(style) as CellStyle, scale: k });
+			return new Promise((resolve) => c.toBlob((b) => resolve(b), 'image/jpeg', 0.8));
+		} catch {
+			return Promise.resolve(null);
+		}
+	}
+	/** Opens a saved grid with its own images, edits and settings. The current one is saved first. */
+	async function openGrid(id: string) {
+		if (id === gridId && images.length) return;
+		const rec = await getGrid<Snapshot>(id);
+		if (!rec) return;
+		flush();
+		saveToLibrary();
+		const files = await loadFiles(rec.imageIds.filter((i) => !pool.has(i)));
+		loading += files.size;
+		for (const [fid, file] of files) {
+			try {
+				const img = await loadImage(file);
+				img.id = fid;
+				pool.set(fid, img);
+			} catch {
+				// A stored file that can't be read is skipped.
+			}
+		}
+		loading -= files.size;
+		if (rec.background) await setBackgroundImage(rec.background, false);
+		if (rec.cellBackground) await setCellImage(rec.cellBackground, false);
+		const before = current;
+		restore({ ...rec.snap, gridId: rec.id, showingExamples: false });
+		selected = [];
+		// restore() treats the snapshot as the current one; record the switch as an undo step.
+		const snap = capture();
+		current = { snap, key: JSON.stringify(snap) };
+		if (before) past = [...past, before.snap].slice(-HISTORY_MAX);
+		future = [];
+		prune();
+		persist();
+	}
+	/** Starts a copy of a saved grid as a new library entry, sharing its image files. */
+	async function duplicateGrid(id: string) {
+		const rec = await getGrid<Snapshot>(id);
+		if (!rec) return;
+		const copy = newGridId();
+		await putGrid({ ...rec, id: copy, name: `${rec.name} copy`, created: Date.now(), updated: Date.now(), pinned: false, snap: { ...rec.snap, gridId: copy } });
+		libraryTick++;
 	}
 
 	// Keep the grid across reloads (this browser only).
@@ -703,7 +837,8 @@
 					const img = pool.get(i.id);
 					return img?.file ? [{ id: i.id, file: img.file }] : [];
 				});
-		syncFiles(files);
+		saveToLibrary();
+		libraryQueue = libraryQueue.then(() => syncFiles(files));
 		saveBackground(bgImage?.file ?? null, 'canvas');
 		saveBackground(cellImage?.file ?? null, 'cell');
 	}
@@ -774,6 +909,7 @@
 	});
 
 	function restore(snap: Snapshot) {
+		gridId = snap.gridId ?? newGridId();
 		images = snap.images.flatMap(({ id, adjust, span, title, desc, empty }) => {
 			let img = pool.get(id);
 			if (!img && empty) pool.set(id, (img = emptySlot(id)));
@@ -987,6 +1123,9 @@
 		images = images.filter((i) => i.id !== id);
 	}
 	function clearAll() {
+		flush();
+		saveToLibrary();
+		gridId = newGridId();
 		images = [];
 		showingExamples = false;
 	}
@@ -1480,6 +1619,7 @@
 	{/await}
 {/if}
 <WelcomeLetter bind:open={letterOpen} />
+<GridLibrary bind:open={libraryOpen} currentId={gridId} tick={libraryTick} onopen={openGrid} onduplicate={duplicateGrid} />
 
 {#snippet dockHeader()}
 	<div class="flex h-[49px] shrink-0 items-center gap-3 border-b px-4">
@@ -1648,6 +1788,11 @@
 				<span class="font-logo translate-y-[0.11em] text-[22px] leading-none italic">Griddle</span>
 			</div>
 			<div class="ml-auto flex items-center gap-1">
+				<Button variant="ghost" size="sm" class="h-8 px-2.5" onclick={() => (libraryOpen = true)} data-testid="open-library">
+					<FolderOpenIcon />
+					Grids
+				</Button>
+				<span class="bg-border mx-1.5 h-5 w-px" aria-hidden="true"></span>
 				{@render iconAction(`Undo (${mod}Z)`, Undo2Icon, undo, !past.length)}
 				{@render iconAction(isMac ? 'Redo (⇧⌘Z)' : 'Redo (Ctrl+Y)', Redo2Icon, redo, !future.length)}
 				<span class="bg-border mx-1.5 h-5 w-px" aria-hidden="true"></span>
@@ -2198,6 +2343,7 @@
 							onsample={loadSamples}
 						>
 							{#snippet extra()}
+								<RecentGrids tick={libraryTick} onopen={openGrid} onall={() => (libraryOpen = true)} />
 								{#if DEV}
 									<Button variant="ghost" size="sm" onclick={loadPokemon} disabled={loading > 0} data-testid="load-pokemon">Load 25 Pokémon</Button>
 								{/if}
