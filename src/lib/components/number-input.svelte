@@ -10,8 +10,19 @@
 		step = 1,
 		unit = 'px',
 		label,
-		disabled = false
-	}: { value: number; min?: number; max?: number; step?: number; unit?: string; label: string; disabled?: boolean } = $props();
+		disabled = false,
+		mixed = false
+	}: {
+		value: number;
+		min?: number;
+		max?: number;
+		step?: number;
+		unit?: string;
+		label: string;
+		disabled?: boolean;
+		/** Shows Mixed instead of a value. */
+		mixed?: boolean;
+	} = $props();
 
 	let draft = $state<string | null>(null);
 
@@ -50,14 +61,15 @@
 	class:opacity-40={disabled}
 >
 	<input
-		class="w-full min-w-0 bg-transparent outline-none {unit ? 'text-right' : 'text-center'}"
+		class="placeholder:text-muted-foreground w-full min-w-0 bg-transparent outline-none placeholder:text-xs {unit ? 'text-right' : 'text-center'}"
 		inputmode="decimal"
 		aria-label={label}
 		{disabled}
-		value={draft ?? String(value)}
+		value={draft ?? (mixed ? '' : String(value))}
+		placeholder={mixed ? 'Mixed' : undefined}
 		oninput={(e) => (draft = e.currentTarget.value)}
 		onblur={commit}
 		{onkeydown}
 	/>
-	{#if unit}<span class="text-muted-foreground shrink-0 text-xs">{unit}</span>{/if}
+	{#if unit && !(mixed && draft === null)}<span class="text-muted-foreground shrink-0 text-xs">{unit}</span>{/if}
 </label>

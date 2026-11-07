@@ -24,6 +24,8 @@
 	import CellOverlay from '$lib/components/cell-overlay.svelte';
 	import ToggleSection from '$lib/components/toggle-section.svelte';
 	import PaneScroll from '$lib/components/pane-scroll.svelte';
+	import ImagePane from '$lib/components/image-pane.svelte';
+	import { applyChange, copySettings, type CellChange, type CellSettings } from '$lib/cell-edits';
 	import LineStyleFields from '$lib/components/line-style-fields.svelte';
 	import BackgroundPicker from '$lib/components/background-picker.svelte';
 	import SliderField from '$lib/components/slider-field.svelte';
@@ -387,6 +389,92 @@
 	});
 	/** The image last picked in the tray or on the grid; the tray tints it. */
 	let activeId = $state<string | null>(null);
+
+	// Selection: the images that bulk edits apply to. Only images (not empty slots) are selected.
+	let selected = $state<string[]>([]);
+	const selectedSet = $derived(new Set(selected.filter((id) => images.some((i) => i.id === id && i.file))));
+	const selectedIdx = $derived(images.flatMap((img, i) => (selectedSet.has(img.id) ? [i] : [])));
+	/** A click picks one image; Shift, Cmd or Ctrl adds or removes it. */
+	function selectImage(id: string, e?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) {
+		activeId = id;
+		if (!images.some((i) => i.id === id && i.file)) return;
+		if (e && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+			selected = selectedSet.has(id) ? [...selectedSet].filter((x) => x !== id) : [...selectedSet, id];
+		} else selected = [id];
+	}
+	function selectAll() {
+		selected = images.filter((i) => i.file).map((i) => i.id);
+	}
+	function clearSelection() {
+		selected = [];
+	}
+
+	/** Applies a framing change to image `i`, or to every selected image when `i` is selected. */
+	function editCell(i: number, change: CellChange) {
+		const id = images[i]?.id;
+		editImages(id && selectedSet.has(id) ? selectedIdx : [i], change);
+	}
+	function editImages(idx: number[], change: CellChange) {
+		for (const j of idx) {
+			const img = images[j];
+			if (!img?.file) continue;
+			img.adjust = applyChange({ adjust: img.adjust, width: img.width, height: img.height, area: displayAreas[j] ?? null }, change, {
+				fit,
+				free: style.fill.on
+			});
+		}
+	}
+
+	// Copy settings keeps one image's settings to paste onto others.
+	let copiedSettings = $state<CellSettings | null>(null);
+	function copySettingsFrom(i: number) {
+		const img = images[i];
+		if (!img?.file) return;
+		copiedSettings = copySettings(img.adjust);
+		toast.success('Settings copied');
+	}
+	/** Copies from the image last clicked, if it is selected, or else the first selected one. */
+	function copySelectedSettings() {
+		const i = images.findIndex((img) => img.id === activeId);
+		copySettingsFrom(i >= 0 && selectedSet.has(images[i].id) ? i : (selectedIdx[0] ?? -1));
+	}
+	function pasteSettings(idx: number[]) {
+		if (copiedSettings && idx.length) editImages(idx, { kind: 'set', values: copiedSettings });
+	}
+
+	// Drag across the canvas from outside the cells to select the cells the box touches.
+	let marquee = $state<{ x: number; y: number; w: number; h: number } | null>(null);
+	function startMarquee(e: PointerEvent) {
+		if (e.button !== 0 || spaceHeld || !previewEl) return;
+		const t = e.target as Element;
+		if (t.closest('[data-testid=cell], [data-cell-control], button, input, [role=dialog]')) return;
+		const box = previewEl.getBoundingClientRect();
+		const start = { x: e.clientX - box.left, y: e.clientY - box.top };
+		const base = e.shiftKey || e.metaKey || e.ctrlKey ? [...selectedSet] : [];
+		let moved = false;
+		const move = (ev: PointerEvent) => {
+			const x = ev.clientX - box.left;
+			const y = ev.clientY - box.top;
+			if (!moved && Math.hypot(x - start.x, y - start.y) < 4) return;
+			moved = true;
+			const r = { x: Math.min(x, start.x), y: Math.min(y, start.y), w: Math.abs(x - start.x), h: Math.abs(y - start.y) };
+			marquee = r;
+			const hit = displayCells.flatMap((c, i) =>
+				images[i]?.file && c.x < r.x + r.w && c.x + c.w > r.x && c.y < r.y + r.h && c.y + c.h > r.y ? [images[i].id] : []
+			);
+			selected = [...new Set([...base, ...hit])];
+		};
+		const up = () => {
+			if (!moved && !base.length) clearSelection();
+			marquee = null;
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+		window.addEventListener('pointercancel', up);
+	}
 	let trayEl = $state<HTMLOListElement>();
 	let trayLeft = $state(false);
 	let trayRight = $state(false);
@@ -748,6 +836,21 @@
 	function onKeydown(e: KeyboardEvent) {
 		const t = e.target as HTMLElement | null;
 		if (t?.closest('input, textarea, [contenteditable="true"]')) return;
+		if (e.key === 'Escape' && selected.length && !t?.closest('[role=dialog], [role=menu]')) {
+			clearSelection();
+			return;
+		}
+		if ((e.metaKey || e.ctrlKey) && e.altKey && (e.code === 'KeyC' || e.code === 'KeyV') && selectedSet.size) {
+			e.preventDefault();
+			if (e.code === 'KeyC') copySelectedSettings();
+			else pasteSettings(selectedIdx);
+			return;
+		}
+		if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a' && images.some((i) => i.file)) {
+			e.preventDefault();
+			selectAll();
+			return;
+		}
 		if (e.shiftKey && e.code === 'Digit1' && !(e.metaKey || e.ctrlKey || e.altKey) && images.length) {
 			e.preventDefault();
 			recenter();
@@ -1115,17 +1218,18 @@
 		window.addEventListener('pointercancel', cancel);
 	}
 
-	type PaneTab = 'layout' | 'style' | 'export';
+	type PaneTab = 'layout' | 'style' | 'image' | 'export';
 	const PANE_TABS: { id: PaneTab; label: string }[] = [
 		{ id: 'layout', label: 'Layout' },
 		{ id: 'style', label: 'Style' },
+		{ id: 'image', label: 'Image' },
 		{ id: 'export', label: 'Export' }
 	];
 	let paneTab = $state<PaneTab>(readPaneTab());
 	function readPaneTab(): PaneTab {
 		try {
 			const t = localStorage.getItem('griddle:tab');
-			return t === 'style' || t === 'export' ? t : 'layout';
+			return t === 'style' || t === 'image' || t === 'export' ? t : 'layout';
 		} catch {
 			return 'layout';
 		}
@@ -1380,7 +1484,7 @@
 {#snippet dockHeader()}
 	<div class="flex h-[49px] shrink-0 items-center gap-3 border-b px-4">
 		<span class="text-muted-foreground min-w-0 text-xs leading-tight tabular-nums">
-			{#if showingExamples}<span class="whitespace-nowrap">Example images</span>{#if dockSide === 'bottom'}<span> · </span>{:else}<br />{/if}<button type="button" class="text-foreground whitespace-nowrap underline-offset-2 hover:underline" onclick={() => fileInput.click()}>Add your own</button>
+			{#if showingExamples}<span class="whitespace-nowrap">Example images</span>{#if dockSide === 'bottom'}<span>&nbsp;·&nbsp;</span>{:else}<br />{/if}<button type="button" class="text-foreground whitespace-nowrap underline-offset-2 hover:underline" onclick={() => fileInput.click()}>Add your own</button>
 			{:else}{filled} image{filled === 1 ? '' : 's'}{#if emptyCount}<span>&nbsp;· {emptyCount} empty</span>{/if}{/if}{#if unused && !showingExamples}<span> · {unused} not used</span>{/if}
 		</span>
 		<div class="ml-auto flex shrink-0 items-center gap-1">
@@ -1419,7 +1523,8 @@
 				class="group relative shrink-0 {axis === 'x' ? 'size-[68px] cursor-grab rounded-md p-1 active:cursor-grabbing' : 'flex gap-3 border-b p-3'} transition-[opacity,background-color]"
 				class:bg-accent={axis === 'x' && activeId === img.id}
 				class:tray-hover={axis === 'x' && activeId !== img.id}
-				onclick={axis === 'x' ? () => (activeId = img.id) : undefined}
+				onclick={axis === 'x' ? (e) => selectImage(img.id, e) : undefined}
+				class:selected-thumb={selectedSet.has(img.id)}
 				class:opacity-35={i >= layout.used && dragId !== img.id}
 				class:opacity-40={dragId === img.id}
 				data-row={img.id}
@@ -1582,7 +1687,8 @@
 							tabindex={paneTab === t.id ? 0 : -1}
 							data-tab={t.id}
 							data-testid="tab-{t.id}"
-							onclick={() => showTab(t.id)}>{t.label}</button
+							onclick={() => showTab(t.id)}
+							>{t.label}{#if t.id === 'image' && selectedSet.size}<span class="text-muted-foreground ml-1 text-xs tabular-nums" data-testid="tab-image-count">{selectedSet.size}</span>{/if}</button
 						>
 					{/each}
 				</div>
@@ -1742,7 +1848,7 @@
 
 				{:else if paneTab === 'style'}
 				<section class="pane-section flex items-center justify-between">
-					<h2 class="pane-title">Look</h2>
+					<h2 class="pane-title">Copy and paste</h2>
 					<LooksMenu current={currentLook} onapply={useLook} />
 				</section>
 				<ToggleSection title="Rounded corners" bind:on={style.corners.on}>
@@ -1823,6 +1929,17 @@
 						}}
 					/>
 				</section>
+				{:else if paneTab === 'image'}
+					<ImagePane
+						adjusts={selectedIdx.map((i) => images[i].adjust)}
+						total={images.filter((i) => i.file).length}
+						{mod}
+						onedit={(change) => editImages(selectedIdx, change)}
+						onselectall={selectAll}
+						onclear={clearSelection}
+						oncopy={copySelectedSettings}
+						onpaste={copiedSettings ? () => pasteSettings(selectedIdx) : undefined}
+					/>
 				{:else}
 				<section class="pane-section space-y-3">
 					<div class="flex items-baseline justify-between">
@@ -1931,7 +2048,7 @@
 							class="absolute inset-0 overflow-auto"
 							data-testid="stage-scroll"
 							onscroll={updateView}
-							onpointerdown={(e) => e.button === 1 && startPan(e)}
+							onpointerdown={(e) => (e.button === 1 ? startPan(e) : startMarquee(e))}
 							ondblclick={(e) => !(e.target as Element).closest('[data-testid=preview-box]') && recenter()}
 						>
 						<div class="flex min-h-full min-w-full w-max items-center justify-center" style:padding="{preview.pad}px">
@@ -1952,13 +2069,30 @@
 								style:height="{viewRect.h}px"
 								data-testid="preview"
 							></canvas>
+							{#if marquee}
+								<div
+									class="border-primary bg-primary/10 pointer-events-none absolute z-30 border"
+									style:left="{marquee.x}px"
+									style:top="{marquee.y}px"
+									style:width="{marquee.w}px"
+									style:height="{marquee.h}px"
+									data-testid="marquee"
+								></div>
+							{/if}
 							{#each displayCells as rect, i (images[i]?.id ?? i)}
 								{#if images[i]}
 									<CellOverlay
 										{rect}
 										area={displayAreas[i]}
 										free={style.fill.on}
-										onselect={() => revealInPane(images[i].id)}
+										onselect={(e) => {
+											selectImage(images[i].id, e);
+											revealInPane(images[i].id);
+										}}
+										selected={selectedSet.has(images[i].id)}
+										onedit={(change) => editCell(i, change)}
+										oncopysettings={() => copySettingsFrom(i)}
+										onpastesettings={copiedSettings ? () => pasteSettings(selectedSet.has(images[i].id) ? selectedIdx : [i]) : undefined}
 										image={images[i]}
 										{fit}
 										index={i}
@@ -2114,6 +2248,12 @@
 </Tooltip.Provider>
 
 <style>
+	/* Selected images in the tray and side list get the same two rings as on the grid. */
+	.selected-thumb {
+		box-shadow:
+			inset 0 0 0 2px var(--primary),
+			inset 0 0 0 4px var(--background);
+	}
 	.tray-scroll {
 		scrollbar-width: none;
 	}
