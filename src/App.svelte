@@ -40,6 +40,8 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import InfoDialogs from '$lib/components/info-dialogs.svelte';
+	import FeedbackDialog from '$lib/components/feedback/feedback-dialog.svelte';
+	import { feedback, openFeedback } from '$lib/feedback/state.svelte';
 	import StartPanel from '$lib/components/start-panel.svelte';
 	import WelcomeLetter from '$lib/components/welcome-letter.svelte';
 	import ArrowLeftRightIcon from '@lucide/svelte/icons/arrow-left-right';
@@ -1131,6 +1133,20 @@
 		(e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
 	}
 	let exportFormat = $state<ExportFormat | 'psd'>('png');
+
+	/** What Send feedback's "Include diagnostic info" adds. Settings only, never images or captions. */
+	function feedbackDiagnostics(): string {
+		const filled = images.filter((i) => i.file).length;
+		return [
+			`Build: ${import.meta.env.VITE_BUILD_ID ?? 'dev'}`,
+			`Browser: ${navigator.userAgent}`,
+			`Window: ${innerWidth}×${innerHeight} @${devicePixelRatio}x`,
+			`Theme: ${document.documentElement.classList.contains('dark') ? 'dark' : 'light'}`,
+			`Grid: ${layout.cols}×${layout.rows}, ${layout.width}×${layout.height} px, ${filled} image${filled === 1 ? '' : 's'}, ${images.length - filled} empty, auto layout ${autoLayout ? 'on' : 'off'}`,
+			`Export: ${exportFormat}`,
+			`Tab: ${typeof location !== 'undefined' ? location.pathname : ''}`
+		].join('\n');
+	}
 	const FORMATS: { id: ExportFormat | 'psd'; label: string }[] = [
 		{ id: 'png', label: 'PNG' },
 		{ id: 'jpeg', label: 'JPG' },
@@ -1337,6 +1353,16 @@
 <ModeWatcher />
 <Toaster position="bottom-center" />
 <InfoDialogs bind:open={infoOpen} />
+<FeedbackDialog diagnostics={feedbackDiagnostics} />
+{#if feedback.picking}
+	{#await import('$lib/components/feedback/feedback-picker.svelte') then { default: FeedbackPicker }}
+		<FeedbackPicker root={document.getElementById('app') ?? document.body} />
+	{/await}
+{:else if feedback.minimized}
+	{#await import('$lib/components/feedback/feedback-orb.svelte') then { default: FeedbackOrb }}
+		<FeedbackOrb />
+	{/await}
+{/if}
 <WelcomeLetter bind:open={letterOpen} />
 
 {#snippet dockHeader()}
@@ -1541,6 +1567,8 @@
 						<DropdownMenu.Item onclick={() => (letterOpen = true)} data-testid="info-welcome">Welcome letter</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => (infoOpen = 'help')} data-testid="info-help">Help</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => (infoOpen = 'privacy')} data-testid="info-privacy">Privacy</DropdownMenu.Item>
+						<DropdownMenu.Separator />
+						<DropdownMenu.Item onclick={openFeedback} data-testid="info-feedback">Send feedback</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
 			</div>
