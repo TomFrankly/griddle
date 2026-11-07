@@ -2,9 +2,21 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Plugin } from 'vite'
 import path from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+
+// Wrangler's local secrets file (KEY=value lines), read on each request so edits apply at once.
+function devVars(): Record<string, string> {
+  if (!existsSync('.dev.vars')) return {}
+  const vars: Record<string, string> = {}
+  for (const line of readFileSync('.dev.vars', 'utf8').split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/i)
+    if (m) vars[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2')
+  }
+  return vars
+}
 
 // Send feedback in `npm run dev`: the Worker's handler, with the Notion secrets taken from
-// the environment (export NOTION_FEEDBACK_TOKEN and NOTION_FEEDBACK_DATA_SOURCE_ID to try it).
+// .dev.vars or the environment (NOTION_FEEDBACK_TOKEN and NOTION_FEEDBACK_DATA_SOURCE_ID).
 const feedbackApi = (): Plugin => ({
   name: 'griddle-feedback-api',
   apply: 'serve',
@@ -19,7 +31,7 @@ const feedbackApi = (): Plugin => ({
         body: req.method === 'POST' ? Buffer.concat(chunks) : undefined,
       })
       const { handleFeedback } = await server.ssrLoadModule('/worker/feedback.ts')
-      const response: Response = await handleFeedback(request, process.env, 'local')
+      const response: Response = await handleFeedback(request, { ...process.env, ...devVars() }, 'local')
       res.statusCode = response.status
       res.setHeader('Content-Type', 'application/json')
       res.end(await response.text())
