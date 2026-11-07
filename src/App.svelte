@@ -232,7 +232,13 @@
 	const bands = $derived(captionBands(style.captions));
 	const masonry = $derived(arrange !== 'grid');
 	/** Each image's shape; empty slots use the cell shape. */
-	const aspects = $derived(images.map((i) => (hasImage(i) && i.width && i.height ? i.width / i.height : ratio || 1)));
+	const aspects = $derived(
+		images.map((i) => {
+			if (!hasImage(i) || !i.width || !i.height) return ratio || 1;
+			const s = editedSize(i.width, i.height, i.edits);
+			return s.width / s.height;
+		})
+	);
 	const layout = $derived(
 		arrange === 'grid'
 			? computeLayout({
