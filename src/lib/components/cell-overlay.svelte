@@ -21,6 +21,7 @@
 	import Stepper from './stepper.svelte';
 	import RichText from './rich-text.svelte';
 	import CopyIcon from '@lucide/svelte/icons/copy';
+	import Maximize2Icon from '@lucide/svelte/icons/maximize-2';
 	import ClipboardPasteIcon from '@lucide/svelte/icons/clipboard-paste';
 	import { minZoom, ZOOM_MAX, type Rect } from '$lib/grid';
 	import { applyChange, focusOf, framePlace, RESET_FRAMING, type CellChange } from '$lib/cell-edits';
@@ -50,7 +51,8 @@
 		onedit,
 		oncopysettings,
 		onpastesettings,
-		onfocus
+		onfocus,
+		onopeneditor
 	}: {
 		rect: Rect;
 		/** Where the image may sit inside the cell, when that is smaller than the cell. */
@@ -72,6 +74,8 @@
 		onpastesettings?: () => void;
 		/** Alt-click sets the image's focal point: x and y from 0 to 1 across the image. */
 		onfocus?: (x: number, y: number) => void;
+		/** Opens this image in the frame editor. */
+		onopeneditor?: () => void;
 		onfiles?: (files: FileList) => void;
 		cols?: number;
 		rows?: number;
@@ -384,6 +388,19 @@
 						data-testid="cell-copy-settings"
 					>
 						<CopyIcon class="size-4" /> Copy settings
+					</button>
+				{/if}
+				{#if !empty && onopeneditor}
+					<button
+						type="button"
+						class="hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
+						onclick={() => {
+							allOpen = false;
+							onopeneditor();
+						}}
+						data-testid="cell-open-editor"
+					>
+						<Maximize2Icon class="size-4" /> Open in editor
 					</button>
 				{/if}
 				{#if !empty && onpastesettings}

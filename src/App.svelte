@@ -20,6 +20,7 @@
 	import { Slider } from '$lib/components/ui/slider/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import InfoTip from '$lib/components/info-tip.svelte';
+	import FrameEditor from '$lib/components/frame-editor.svelte';
 	import Stepper from '$lib/components/stepper.svelte';
 	import CellOverlay from '$lib/components/cell-overlay.svelte';
 	import ToggleSection from '$lib/components/toggle-section.svelte';
@@ -456,6 +457,18 @@
 				free: style.fill.on
 			});
 		}
+	}
+
+	// The frame editor: one image opened over the stage, growing out of its cell.
+	let editingId = $state<string | null>(null);
+	const editingIdx = $derived(editingId ? images.findIndex((i) => i.id === editingId && i.file) : -1);
+	let frameEditor = $state<{ close: () => Promise<void> }>();
+	function openEditor(id = activeId && selectedSet.has(activeId) ? activeId : [...selectedSet][0]) {
+		if (!id || !images.some((i) => i.id === id && i.file)) return;
+		selected = [id];
+		activeId = id;
+		paneTab = 'image';
+		editingId = id;
 	}
 
 	/** Auto tone runs per image: each one gets exposure, levels and white balance from its own tones. */
@@ -996,6 +1009,8 @@
 	// Every command with a shortcut, in one list that the keyboard, menus and outside controllers share.
 	const hasSelection = () => selectedSet.size > 0;
 	const actions = new ActionRegistry().register(
+		{ id: 'editor.close', label: 'Close the frame editor', group: 'image', keys: ['Escape'], enabled: () => editingIdx >= 0, run: () => frameEditor?.close() },
+		{ id: 'image.openEditor', label: 'Open in editor', group: 'image', keys: ['E'], enabled: () => selectedSet.size > 0 && editingIdx < 0, run: () => openEditor() },
 		{ id: 'selection.clear', label: 'Clear selection', group: 'selection', keys: ['Escape'], enabled: () => selected.length > 0, run: clearSelection },
 		{ id: 'selection.all', label: 'Select all images', group: 'selection', keys: ['Mod+A'], enabled: () => images.some((i) => i.file), run: selectAll },
 		{ id: 'image.copySettings', label: 'Copy settings', group: 'image', keys: ['Mod+Alt+C'], enabled: hasSelection, run: copySelectedSettings },
@@ -2206,6 +2221,18 @@
 					bind:clientHeight={stageH}
 					class="bg-accent relative flex {images.length ? 'h-[62svh]' : 'h-[calc(100svh-49px)]'} items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
+					{#if editingIdx >= 0 && displayAreas[editingIdx]}
+						<FrameEditor
+							bind:this={frameEditor}
+							image={images[editingIdx]}
+							area={displayAreas[editingIdx]}
+							cellRect={() => previewEl?.querySelector(`[data-testid=cell][data-index="${editingIdx}"]`)?.getBoundingClientRect() ?? null}
+							{fit}
+							free={style.fill.on}
+							onedit={(change) => editImages([editingIdx], change)}
+							onclose={() => (editingId = null)}
+						/>
+					{/if}
 					{#if images.length}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
@@ -2259,6 +2286,7 @@
 										onedit={(change) => editCell(i, change)}
 										oncopysettings={() => copySettingsFrom(i)}
 										onfocus={(x, y) => setFocus(i, x, y)}
+										onopeneditor={() => openEditor(images[i].id)}
 										onpastesettings={copiedSettings ? () => pasteSettings(selectedSet.has(images[i].id) ? selectedIdx : [i]) : undefined}
 										image={images[i]}
 										{fit}
