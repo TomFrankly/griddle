@@ -20,6 +20,7 @@
 	import { Slider } from '$lib/components/ui/slider/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import InfoTip from '$lib/components/info-tip.svelte';
+	import FrameEditor from '$lib/components/frame-editor.svelte';
 	import Stepper from '$lib/components/stepper.svelte';
 	import CellOverlay from '$lib/components/cell-overlay.svelte';
 	import ToggleSection from '$lib/components/toggle-section.svelte';
@@ -28,7 +29,10 @@
 	import GridLibrary from '$lib/components/grid-library.svelte';
 	import RecentGrids from '$lib/components/recent-grids.svelte';
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
-	import { applyChange, copySettings, type CellChange, type CellSettings } from '$lib/cell-edits';
+	import { ALL_GROUPS, applyChange, applyImageEdit, copySettings, isImageEdit, pasteChanges, type CellChange, type CellSettings } from '$lib/cell-edits';
+	import { autoTone, editedSize, normalizeEdits, resetGroups, type ImageEdits } from '$lib/edits';
+	import { focusOf } from '$lib/cell-edits';
+	import { ActionRegistry } from '$lib/actions/registry';
 	import LineStyleFields from '$lib/components/line-style-fields.svelte';
 	import BackgroundPicker from '$lib/components/background-picker.svelte';
 	import SliderField from '$lib/components/slider-field.svelte';
@@ -443,11 +447,42 @@
 		for (const j of idx) {
 			const img = images[j];
 			if (!img?.file) continue;
-			img.adjust = applyChange({ adjust: img.adjust, width: img.width, height: img.height, area: displayAreas[j] ?? null }, change, {
+			if (isImageEdit(change)) {
+				img.edits = applyImageEdit(img.edits, change);
+				continue;
+			}
+			const size = editedSize(img.width, img.height, img.edits);
+			img.adjust = applyChange({ adjust: img.adjust, ...size, area: displayAreas[j] ?? null, focus: focusOf(img.edits) }, change, {
 				fit,
 				free: style.fill.on
 			});
 		}
+	}
+
+	// The frame editor: one image opened over the stage, growing out of its cell.
+	let editingId = $state<string | null>(null);
+	const editingIdx = $derived(editingId ? images.findIndex((i) => i.id === editingId && i.file) : -1);
+	let frameEditor = $state<{ close: () => Promise<void> }>();
+	function openEditor(id = activeId && selectedSet.has(activeId) ? activeId : [...selectedSet][0]) {
+		if (!id || !images.some((i) => i.id === id && i.file)) return;
+		selected = [id];
+		activeId = id;
+		paneTab = 'image';
+		editingId = id;
+	}
+
+	/** Auto tone runs per image: each one gets exposure, levels and white balance from its own tones. */
+	function autoToneSelected() {
+		for (const j of selectedIdx) {
+			const img = images[j];
+			if (img?.thumb) editImages([j], { kind: 'edit', values: autoTone(img.thumb) });
+		}
+	}
+
+	/** Sets one image's focal point and centers it there; later zooms and cell changes keep it in view. */
+	function setFocus(i: number, x: number, y: number) {
+		editImages([i], { kind: 'edit', values: { focusX: x * 100, focusY: y * 100 } });
+		editImages([i], { kind: 'set', values: { ox: 0, oy: 0 } });
 	}
 
 	// Copy settings keeps one image's settings to paste onto others.
@@ -455,7 +490,7 @@
 	function copySettingsFrom(i: number) {
 		const img = images[i];
 		if (!img?.file) return;
-		copiedSettings = copySettings(img.adjust);
+		copiedSettings = copySettings(img.adjust, img.edits);
 		toast.success('Settings copied');
 	}
 	/** Copies from the image last clicked, if it is selected, or else the first selected one. */
@@ -464,7 +499,7 @@
 		copySettingsFrom(i >= 0 && selectedSet.has(images[i].id) ? i : (selectedIdx[0] ?? -1));
 	}
 	function pasteSettings(idx: number[]) {
-		if (copiedSettings && idx.length) editImages(idx, { kind: 'set', values: copiedSettings });
+		if (copiedSettings && idx.length) for (const change of pasteChanges(copiedSettings)) editImages(idx, change);
 	}
 
 	// Drag across the canvas from outside the cells to select the cells the box touches.
@@ -626,7 +661,8 @@
 				const adjust = { zoom: img.adjust.zoom, ox: img.adjust.ox, oy: img.adjust.oy };
 				const title = $state.snapshot(img.title);
 				const desc = $state.snapshot(img.desc);
-				return { source: img.thumb, width: img.width, height: img.height, adjust, title, desc };
+				const edits = $state.snapshot(img.edits);
+				return { source: img.thumb, width: img.width, height: img.height, adjust, edits, title, desc };
 			},
 			{ background, cellBackground, fit, style: $state.snapshot(style) as CellStyle, scale: (preview.w * dpr) / layout.width, view: { x: v.x * dpr, y: v.y * dpr } }
 		);
@@ -646,7 +682,7 @@
 	// Undo and redo. Each entry is a snapshot of the composition; images are referenced by id and
 	// kept decoded in `pool` until no snapshot uses them.
 	type Snapshot = {
-		images: { id: string; adjust: GridImage['adjust']; span: GridImage['span']; title: GridImage['title']; desc: GridImage['desc']; empty?: true }[];
+		images: { id: string; adjust: GridImage['adjust']; edits?: ImageEdits; span: GridImage['span']; title: GridImage['title']; desc: GridImage['desc']; empty?: true }[];
 		autoLayout: boolean;
 		quality: number;
 		cols: number;
@@ -678,6 +714,7 @@
 			images: images.map((i) => ({
 				id: i.id,
 				adjust: { zoom: i.adjust.zoom, ox: i.adjust.ox, oy: i.adjust.oy },
+				edits: $state.snapshot(i.edits),
 				span: { w: i.span.w, h: i.span.h },
 				title: $state.snapshot(i.title),
 				desc: $state.snapshot(i.desc),
@@ -771,7 +808,7 @@
 			const imgs = images;
 			drawGrid(ctx, layout, (i) => {
 				const img = imgs[i];
-				return img ? { source: img.thumb, width: img.width, height: img.height, adjust: { ...img.adjust }, title: $state.snapshot(img.title), desc: $state.snapshot(img.desc) } : null;
+				return img ? { source: img.thumb, width: img.width, height: img.height, adjust: { ...img.adjust }, edits: $state.snapshot(img.edits), title: $state.snapshot(img.title), desc: $state.snapshot(img.desc) } : null;
 			}, { background, cellBackground, fit, style: $state.snapshot(style) as CellStyle, scale: k });
 			return new Promise((resolve) => c.toBlob((b) => resolve(b), 'image/jpeg', 0.8));
 		} catch {
@@ -910,10 +947,10 @@
 
 	function restore(snap: Snapshot) {
 		gridId = snap.gridId ?? newGridId();
-		images = snap.images.flatMap(({ id, adjust, span, title, desc, empty }) => {
+		images = snap.images.flatMap(({ id, adjust, edits, span, title, desc, empty }) => {
 			let img = pool.get(id);
 			if (!img && empty) pool.set(id, (img = emptySlot(id)));
-			return img ? [{ ...img, adjust: { ...adjust }, span: { ...span }, title: structuredClone(title), desc: structuredClone(desc) }] : [];
+			return img ? [{ ...img, adjust: { ...adjust }, edits: normalizeEdits(edits), span: { ...span }, title: structuredClone(title), desc: structuredClone(desc) }] : [];
 		});
 		autoLayout = snap.autoLayout;
 		quality = snap.quality;
@@ -969,38 +1006,35 @@
 		}
 	}
 
+	// Every command with a shortcut, in one list that the keyboard, menus and outside controllers share.
+	const hasSelection = () => selectedSet.size > 0;
+	const actions = new ActionRegistry().register(
+		{ id: 'editor.close', label: 'Close the frame editor', group: 'image', keys: ['Escape'], enabled: () => editingIdx >= 0, run: () => frameEditor?.close() },
+		{ id: 'image.openEditor', label: 'Open in editor', group: 'image', keys: ['E'], enabled: () => selectedSet.size > 0 && editingIdx < 0, run: () => openEditor() },
+		{ id: 'selection.clear', label: 'Clear selection', group: 'selection', keys: ['Escape'], enabled: () => selected.length > 0, run: clearSelection },
+		{ id: 'selection.all', label: 'Select all images', group: 'selection', keys: ['Mod+A'], enabled: () => images.some((i) => i.file), run: selectAll },
+		{ id: 'image.copySettings', label: 'Copy settings', group: 'image', keys: ['Mod+Alt+C'], enabled: hasSelection, run: copySelectedSettings },
+		{ id: 'image.pasteSettings', label: 'Paste settings', group: 'image', keys: ['Mod+Alt+V'], enabled: hasSelection, run: () => pasteSettings(selectedIdx) },
+		{ id: 'image.rotateLeft', label: 'Rotate left', group: 'image', keys: ['Mod+Shift+['], enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'shift', id: 'turn', by: -90 }) },
+		{ id: 'image.rotateRight', label: 'Rotate right', group: 'image', keys: ['Mod+Shift+]'], enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'shift', id: 'turn', by: 90 }) },
+		{ id: 'image.flipHorizontal', label: 'Flip horizontal', group: 'image', enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'shift', id: 'flipH', by: 1 }) },
+		{ id: 'image.flipVertical', label: 'Flip vertical', group: 'image', enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'shift', id: 'flipV', by: 1 }) },
+		{ id: 'image.autoTone', label: 'Auto tone', group: 'image', enabled: hasSelection, run: autoToneSelected },
+		{ id: 'image.resetEdits', label: 'Reset image edits', group: 'image', enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'edit', values: resetGroups(ALL_GROUPS) }) },
+		{ id: 'view.recenter', label: 'Center the view', group: 'view', keys: ['Shift+1'], enabled: () => images.length > 0, run: () => recenter() },
+		{ id: 'view.zoomIn', label: 'Zoom in', group: 'view', keys: ['Mod+=', 'Mod+Shift+='], run: () => zoomStep(1) },
+		{ id: 'view.zoomOut', label: 'Zoom out', group: 'view', keys: ['Mod+-', 'Mod+Shift+-'], run: () => zoomStep(-1) },
+		{ id: 'view.actualSize', label: 'Zoom to fit', group: 'view', keys: ['Mod+0'], run: () => zoomTo(1) },
+		{ id: 'history.undo', label: 'Undo', group: 'history', keys: ['Mod+Z'], run: undo },
+		{ id: 'history.redo', label: 'Redo', group: 'history', keys: ['Mod+Shift+Z', 'Ctrl+Y'], run: redo }
+	);
+
 	function onKeydown(e: KeyboardEvent) {
 		const t = e.target as HTMLElement | null;
 		if (t?.closest('input, textarea, [contenteditable="true"]')) return;
-		if (e.key === 'Escape' && selected.length && !t?.closest('[role=dialog], [role=menu]')) {
-			clearSelection();
-			return;
-		}
-		if ((e.metaKey || e.ctrlKey) && e.altKey && (e.code === 'KeyC' || e.code === 'KeyV') && selectedSet.size) {
-			e.preventDefault();
-			if (e.code === 'KeyC') copySelectedSettings();
-			else pasteSettings(selectedIdx);
-			return;
-		}
-		if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a' && images.some((i) => i.file)) {
-			e.preventDefault();
-			selectAll();
-			return;
-		}
-		if (e.shiftKey && e.code === 'Digit1' && !(e.metaKey || e.ctrlKey || e.altKey) && images.length) {
-			e.preventDefault();
-			recenter();
-			return;
-		}
-		if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-		const key = e.key.toLowerCase();
-		if (key === '=' || key === '+') zoomStep(1);
-		else if (key === '-' || key === '_') zoomStep(-1);
-		else if (key === '0') zoomTo(1);
-		else if (key === 'z' && !e.shiftKey) undo();
-		else if ((key === 'z' && e.shiftKey) || (key === 'y' && e.ctrlKey && !e.metaKey)) redo();
-		else return;
-		e.preventDefault();
+		// Escape inside a dialog or menu closes that instead.
+		if (e.key === 'Escape' && t?.closest('[role=dialog], [role=menu]')) return;
+		actions.handleKey(e);
 	}
 
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -2077,9 +2111,11 @@
 				{:else if paneTab === 'image'}
 					<ImagePane
 						adjusts={selectedIdx.map((i) => images[i].adjust)}
+						edits={selectedIdx.map((i) => images[i].edits)}
 						total={images.filter((i) => i.file).length}
 						{mod}
 						onedit={(change) => editImages(selectedIdx, change)}
+						onauto={autoToneSelected}
 						onselectall={selectAll}
 						onclear={clearSelection}
 						oncopy={copySelectedSettings}
@@ -2185,6 +2221,18 @@
 					bind:clientHeight={stageH}
 					class="bg-accent relative flex {images.length ? 'h-[62svh]' : 'h-[calc(100svh-49px)]'} items-center justify-center overflow-hidden md:h-auto md:min-h-72 md:flex-1"
 				>
+					{#if editingIdx >= 0 && displayAreas[editingIdx]}
+						<FrameEditor
+							bind:this={frameEditor}
+							image={images[editingIdx]}
+							area={displayAreas[editingIdx]}
+							cellRect={() => previewEl?.querySelector(`[data-testid=cell][data-index="${editingIdx}"]`)?.getBoundingClientRect() ?? null}
+							{fit}
+							free={style.fill.on}
+							onedit={(change) => editImages([editingIdx], change)}
+							onclose={() => (editingId = null)}
+						/>
+					{/if}
 					{#if images.length}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
@@ -2237,6 +2285,8 @@
 										selected={selectedSet.has(images[i].id)}
 										onedit={(change) => editCell(i, change)}
 										oncopysettings={() => copySettingsFrom(i)}
+										onfocus={(x, y) => setFocus(i, x, y)}
+										onopeneditor={() => openEditor(images[i].id)}
 										onpastesettings={copiedSettings ? () => pasteSettings(selectedSet.has(images[i].id) ? selectedIdx : [i]) : undefined}
 										image={images[i]}
 										{fit}
