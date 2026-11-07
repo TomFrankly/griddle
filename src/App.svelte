@@ -29,7 +29,7 @@
 	import RecentGrids from '$lib/components/recent-grids.svelte';
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import { ALL_GROUPS, applyChange, applyImageEdit, copySettings, isImageEdit, pasteChanges, type CellChange, type CellSettings } from '$lib/cell-edits';
-	import { editedSize, normalizeEdits, resetGroups, type ImageEdits } from '$lib/edits';
+	import { autoTone, editedSize, normalizeEdits, resetGroups, type ImageEdits } from '$lib/edits';
 	import { focusOf } from '$lib/cell-edits';
 	import { ActionRegistry } from '$lib/actions/registry';
 	import LineStyleFields from '$lib/components/line-style-fields.svelte';
@@ -455,6 +455,14 @@
 				fit,
 				free: style.fill.on
 			});
+		}
+	}
+
+	/** Auto tone runs per image: each one gets exposure, levels and white balance from its own tones. */
+	function autoToneSelected() {
+		for (const j of selectedIdx) {
+			const img = images[j];
+			if (img?.thumb) editImages([j], { kind: 'edit', values: autoTone(img.thumb) });
 		}
 	}
 
@@ -996,6 +1004,7 @@
 		{ id: 'image.rotateRight', label: 'Rotate right', group: 'image', keys: ['Mod+Shift+]'], enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'shift', id: 'turn', by: 90 }) },
 		{ id: 'image.flipHorizontal', label: 'Flip horizontal', group: 'image', enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'shift', id: 'flipH', by: 1 }) },
 		{ id: 'image.flipVertical', label: 'Flip vertical', group: 'image', enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'shift', id: 'flipV', by: 1 }) },
+		{ id: 'image.autoTone', label: 'Auto tone', group: 'image', enabled: hasSelection, run: autoToneSelected },
 		{ id: 'image.resetEdits', label: 'Reset image edits', group: 'image', enabled: hasSelection, run: () => editImages(selectedIdx, { kind: 'edit', values: resetGroups(ALL_GROUPS) }) },
 		{ id: 'view.recenter', label: 'Center the view', group: 'view', keys: ['Shift+1'], enabled: () => images.length > 0, run: () => recenter() },
 		{ id: 'view.zoomIn', label: 'Zoom in', group: 'view', keys: ['Mod+=', 'Mod+Shift+='], run: () => zoomStep(1) },
@@ -2091,6 +2100,7 @@
 						total={images.filter((i) => i.file).length}
 						{mod}
 						onedit={(change) => editImages(selectedIdx, change)}
+						onauto={autoToneSelected}
 						onselectall={selectAll}
 						onclear={clearSelection}
 						oncopy={copySelectedSettings}

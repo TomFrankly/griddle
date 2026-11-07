@@ -40,6 +40,7 @@
 		total,
 		mod,
 		onedit,
+		onauto,
 		onselectall,
 		onclear,
 		oncopy,
@@ -54,6 +55,8 @@
 		/** The shortcut modifier, such as ⌘ or Ctrl+. */
 		mod: string;
 		onedit: (change: CellChange) => void;
+		/** Auto tone: each selected image gets settings from its own histogram. */
+		onauto: () => void;
 		onselectall: () => void;
 		onclear: () => void;
 		oncopy: () => void;
@@ -203,7 +206,12 @@
 		<section class="pane-section space-y-2" data-testid="edit-{g}">
 			<div class="flex items-center justify-between">
 				<h2 class="pane-title">{GROUP_LABELS[g]}</h2>
-				<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!groupChanged(g)} onclick={() => resetGroup(g)}>Reset</Button>
+				<div class="flex items-center gap-1">
+					{#if g === 'light'}
+						<Button variant="ghost" size="sm" class="h-7 px-2" onclick={onauto} title="Sets exposure, whites, blacks and white balance from each image's own tones" data-testid="auto-tone">Auto</Button>
+					{/if}
+					<Button variant="ghost" size="sm" class="h-7 px-2" disabled={!groupChanged(g)} onclick={() => resetGroup(g)}>Reset</Button>
+				</div>
 			</div>
 			{#each OPERATIONS.filter((op) => op.group === g) as op (op.id)}
 				{#if op.params.every((p) => p.kind === 'curve')}
