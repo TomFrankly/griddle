@@ -149,6 +149,7 @@ const EPS = 1e-6;
 export function segments(layout: Layout): Seg[] {
 	const { slots, cells, gutter: g, bandAbove: ba, bandBelow: bb, cols, rows } = layout;
 	if (!cells.length) return [];
+	if (layout.dividers) return layout.dividers.map((d) => ({ ...d }));
 	const top = (i: number) => (slots[i].r === 0 ? 0 : cells[i].y - ba - g / 2);
 	const bottom = (i: number) => (slots[i].r + slots[i].h >= rows ? layout.height : cells[i].y + cells[i].h + bb + g / 2);
 	const left = (i: number) => (slots[i].c < EPS ? 0 : cells[i].x - g / 2);
