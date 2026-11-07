@@ -39,6 +39,8 @@ export type Layout = {
 	bandAbove: number;
 	bandBelow: number;
 	gutter: number;
+	/** Divider lines, for layouts that aren't on grid units. */
+	dividers?: { axis: 'h' | 'v'; at: number; a: number; b: number }[];
 };
 
 const clampInt = (n: number, min: number, max: number) =>

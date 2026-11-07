@@ -41,6 +41,7 @@
 		onfiles,
 		cols = 1,
 		rows = 1,
+		spannable = true,
 		captions,
 		onreorder,
 		onremove,
@@ -79,6 +80,8 @@
 		onfiles?: (files: FileList) => void;
 		cols?: number;
 		rows?: number;
+		/** False when the layout gives each image its own shape, so it can't span cells. */
+		spannable?: boolean;
 		captions?: CaptionStyle;
 		/** Starts moving this image to another cell. */
 		onreorder?: (e: PointerEvent) => void;
@@ -347,14 +350,16 @@
 	<Popover.Root bind:open={allOpen}>
 		<Popover.Content class="w-64 gap-0 p-0" customAnchor={root} side="right" sideOffset={8} align="start" collisionPadding={8} data-testid="cell-menu">
 			<div class="space-y-3 p-3">
-				<div class="flex items-center justify-between">
-					<span class="text-sm">Across</span>
-					<Stepper bind:value={image.span.w} min={1} max={Math.max(1, cols)} label="Cells across" />
-				</div>
-				<div class="flex items-center justify-between">
-					<span class="text-sm">Down</span>
-					<Stepper bind:value={image.span.h} min={1} max={Math.max(1, rows)} label="Cells down" />
-				</div>
+				{#if spannable}
+					<div class="flex items-center justify-between">
+						<span class="text-sm">Across</span>
+						<Stepper bind:value={image.span.w} min={1} max={Math.max(1, cols)} label="Cells across" />
+					</div>
+					<div class="flex items-center justify-between">
+						<span class="text-sm">Down</span>
+						<Stepper bind:value={image.span.h} min={1} max={Math.max(1, rows)} label="Cells down" />
+					</div>
+				{/if}
 				{#if !empty}
 					<div class="space-y-2">
 						<div class="flex items-center justify-between text-sm">
@@ -499,33 +504,35 @@
 					<GripIcon class="size-3.5" />
 				</button>
 			{/if}
-			<Popover.Root bind:open={spanOpen}>
-				<Popover.Trigger>
-					{#snippet child({ props })}
-						<button
-							{...props}
-							type="button"
-							class="{pill} px-2 text-xs tabular-nums"
-							aria-label="Cells {label} {index + 1} spans: {image.span.w} across, {image.span.h} down"
-							data-testid="cell-span"
-						>
-							<LayoutGridIcon class="size-3.5" />
-							{image.span.w}×{image.span.h}
-						</button>
-					{/snippet}
-				</Popover.Trigger>
-				<Popover.Content class="w-56 space-y-3 p-3" align="start">
-					<div class="text-muted-foreground text-xs">Cells this image covers</div>
-					<div class="flex items-center justify-between">
-						<span class="text-sm">Across</span>
-						<Stepper bind:value={image.span.w} min={1} max={Math.max(1, cols)} label="Cells across" />
-					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-sm">Down</span>
-						<Stepper bind:value={image.span.h} min={1} max={Math.max(1, rows)} label="Cells down" />
-					</div>
-				</Popover.Content>
-			</Popover.Root>
+			{#if spannable}
+				<Popover.Root bind:open={spanOpen}>
+					<Popover.Trigger>
+						{#snippet child({ props })}
+							<button
+								{...props}
+								type="button"
+								class="{pill} px-2 text-xs tabular-nums"
+								aria-label="Cells {label} {index + 1} spans: {image.span.w} across, {image.span.h} down"
+								data-testid="cell-span"
+							>
+								<LayoutGridIcon class="size-3.5" />
+								{image.span.w}×{image.span.h}
+							</button>
+						{/snippet}
+					</Popover.Trigger>
+					<Popover.Content class="w-56 space-y-3 p-3" align="start">
+						<div class="text-muted-foreground text-xs">Cells this image covers</div>
+						<div class="flex items-center justify-between">
+							<span class="text-sm">Across</span>
+							<Stepper bind:value={image.span.w} min={1} max={Math.max(1, cols)} label="Cells across" />
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-sm">Down</span>
+							<Stepper bind:value={image.span.h} min={1} max={Math.max(1, rows)} label="Cells down" />
+						</div>
+					</Popover.Content>
+				</Popover.Root>
+			{/if}
 			{#if captions?.on && (captions.title.on || captions.desc.on)}
 				<Popover.Root bind:open={textOpen}>
 					<Popover.Trigger>

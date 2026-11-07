@@ -65,7 +65,9 @@
 	import LinkIcon from '@lucide/svelte/icons/link-2';
 	import UnlinkIcon from '@lucide/svelte/icons/unlink-2';
 	import { Toggle } from '$lib/components/ui/toggle/index.js';
-	import { autoGrid, computeLayout, randomSpans } from '$lib/grid';
+	import { autoGrid, computeLayout, randomSpans, type Rect } from '$lib/grid';
+	import { autoLines, computeMasonry, type Arrange, type FrameFill } from '$lib/masonry';
+	import { autoTree, computeSplit, leafIds, moveBeside, moveToNewLine, rebalance, reconcile, setWeights, updateAt, type Side, type SplitGap, type SplitNode } from '$lib/split';
 	import DicesIcon from '@lucide/svelte/icons/dices';
 	import { captionBands, ensureCaptionFonts, fromPlain, plainText } from '$lib/captions';
 	import TextStyleFields from '$lib/components/text-style-fields.svelte';
@@ -139,6 +141,12 @@
 	let rows = $state(3);
 	let aspect = $state('1:1');
 	let customAspect = $state({ w: 3, h: 2 });
+	/** Equal cells in a grid, or justified rows / masonry columns that keep each photo's shape. */
+	let arrange = $state<Arrange>('grid');
+	let frameFill = $state<FrameFill>('trim');
+	let evenBottoms = $state(true);
+	/** Your own arrangement in Rows and Columns, once you move an image or drag a gap. */
+	let split = $state.raw<SplitNode | null>(null);
 	let fit = $state<FitMode>('fill');
 	let gap = $state(24);
 	let padding = $state(24);
@@ -225,41 +233,123 @@
 		autoLayout && images.length ? autoGrid(spans, ratio || 1, frame ? frame.w / frame.h : 1) : { cols, rows }
 	);
 	const bands = $derived(captionBands(style.captions));
-	const layout = $derived(
-		computeLayout({
-			count: Math.max(images.length, 1),
-			spans,
-			cols: grid.cols,
-			rows: grid.rows,
-			aspect: ratio,
-			longEdge,
-			frame: frame ? { w: frame.w, h: frame.h } : null,
-			gutter: gap,
-			padding,
-			bandAbove: bands.above,
-			bandBelow: bands.below
+	const masonry = $derived(arrange !== 'grid');
+	/** Each image's shape; empty slots use the cell shape. */
+	const aspects = $derived(
+		images.map((i) => {
+			if (!hasImage(i) || !i.width || !i.height) return ratio || 1;
+			const s = editedSize(i.width, i.height, i.edits);
+			return s.width / s.height;
 		})
 	);
+	const ids = $derived(images.map((i) => i.id));
+	/** How many rows (Rows) or columns (Columns) the automatic arrangement uses. */
+	const masonryLines = $derived(
+		arrange === 'grid'
+			? 1
+			: autoLayout
+				? autoLines({
+						arrange,
+						aspects,
+						longEdge,
+						frame: frame ? { w: frame.w, h: frame.h } : null,
+						frameFill,
+						even: evenBottoms,
+						gutter: gap,
+						padding,
+						bandAbove: bands.above,
+						bandBelow: bands.below
+					})
+				: arrange === 'rows'
+					? rows
+					: cols
+	);
+	/** Ragged columns can't be split evenly, so they keep the plain masonry layout until you change them. */
+	const ragged = $derived(arrange === 'columns' && !split && !evenBottoms && !(frame && frameFill === 'trim'));
+	const tree = $derived(
+		arrange === 'grid' || ragged || !images.length
+			? null
+			: split
+				? reconcile(split, ids)
+				: autoTree(arrange, ids, aspects, masonryLines, (frame ? frame.w : longEdge) - 2 * padding, gap, bands.above + bands.below)
+	);
+	const aspectById = $derived(new Map(images.map((img, i) => [img.id, aspects[i]])));
+	const splitLayout = $derived(
+		tree
+			? computeSplit({
+					tree,
+					ids,
+					aspect: (id) => aspectById.get(id) ?? 1,
+					longEdge,
+					frame: frame ? { w: frame.w, h: frame.h } : null,
+					frameFill,
+					gutter: gap,
+					padding,
+					bandAbove: bands.above,
+					bandBelow: bands.below
+				})
+			: null
+	);
+	const layout = $derived(
+		splitLayout ??
+			(arrange === 'grid'
+				? computeLayout({
+						count: Math.max(images.length, 1),
+						spans,
+						cols: grid.cols,
+						rows: grid.rows,
+						aspect: ratio,
+						longEdge,
+						frame: frame ? { w: frame.w, h: frame.h } : null,
+						gutter: gap,
+						padding,
+						bandAbove: bands.above,
+						bandBelow: bands.below
+					})
+				: computeMasonry({
+						arrange,
+						aspects,
+						lines: autoLayout ? null : arrange === 'rows' ? rows : cols,
+						longEdge,
+						frame: frame ? { w: frame.w, h: frame.h } : null,
+						frameFill,
+						even: evenBottoms,
+						gutter: gap,
+						padding,
+						bandAbove: bands.above,
+						bandBelow: bands.below
+					}))
+	);
+	const splitGaps = $derived<SplitGap[]>(splitLayout?.gaps ?? []);
+	/** The columns and rows the steppers show: the automatic grid, or what the masonry layout used. */
+	const shownGrid = $derived(masonry ? { cols: layout.cols, rows: layout.rows } : grid);
 	/** Manual columns and rows that leave some images out of the grid. */
 	const overflowing = $derived(!autoLayout && images.length > 0 && layout.used < images.length);
 	const unused = $derived(Math.max(0, images.length - layout.used));
 	const filled = $derived(images.filter(hasImage).length);
 	const emptyCount = $derived(images.length - filled);
 
+	// Turning Auto back on lets it arrange the images again.
+	$effect(() => {
+		if (autoLayout) untrack(() => (split = null));
+	});
+
 	/** The steppers show the automatic grid; changing one switches to manual. */
 	const colsBinding = {
-		get: () => grid.cols,
+		get: () => shownGrid.cols,
 		set: (v: number) => {
-			if (autoLayout) rows = grid.rows;
+			if (autoLayout) rows = shownGrid.rows;
 			autoLayout = false;
+			split = null;
 			cols = v;
 		}
 	};
 	const rowsBinding = {
-		get: () => grid.rows,
+		get: () => shownGrid.rows,
 		set: (v: number) => {
-			if (autoLayout) cols = grid.cols;
+			if (autoLayout) cols = shownGrid.cols;
 			autoLayout = false;
+			split = null;
 			rows = v;
 		}
 	};
@@ -279,7 +369,7 @@
 			bgId,
 			customColor,
 			ref: longEdge,
-			...(withCanvas ? { canvas: { size, customSize, aspect, customAspect: { ...customAspect }, autoLayout, cols, rows } } : {})
+			...(withCanvas ? { canvas: { size, customSize, aspect, customAspect: { ...customAspect }, autoLayout, cols, rows, arrange, frameFill, evenBottoms } } : {})
 		};
 	}
 	function useLook(look: Look) {
@@ -292,6 +382,10 @@
 			autoLayout = c.autoLayout;
 			cols = c.cols;
 			rows = c.rows;
+			arrange = c.arrange ?? 'grid';
+			frameFill = c.frameFill ?? 'trim';
+			evenBottoms = c.evenBottoms ?? true;
+			split = null;
 			// The look's pixel values were saved at this size, so nothing needs scaling.
 			lastLongEdge = look.ref;
 		}
@@ -684,6 +778,10 @@
 	type Snapshot = {
 		images: { id: string; adjust: GridImage['adjust']; edits?: ImageEdits; span: GridImage['span']; title: GridImage['title']; desc: GridImage['desc']; empty?: true }[];
 		autoLayout: boolean;
+		arrange?: Arrange;
+		frameFill?: FrameFill;
+		evenBottoms?: boolean;
+		split?: SplitNode | null;
 		quality: number;
 		cols: number;
 		rows: number;
@@ -721,6 +819,10 @@
 				...(i.file ? {} : { empty: true as const })
 			})),
 			autoLayout,
+			arrange,
+			frameFill,
+			evenBottoms,
+			split,
 			quality,
 			cols,
 			rows,
@@ -953,6 +1055,10 @@
 			return img ? [{ ...img, adjust: { ...adjust }, edits: normalizeEdits(edits), span: { ...span }, title: structuredClone(title), desc: structuredClone(desc) }] : [];
 		});
 		autoLayout = snap.autoLayout;
+		arrange = snap.arrange ?? 'grid';
+		frameFill = snap.frameFill ?? 'trim';
+		evenBottoms = snap.evenBottoms ?? true;
+		split = snap.split ?? null;
 		quality = snap.quality;
 		cols = snap.cols;
 		rows = snap.rows;
@@ -1139,6 +1245,7 @@
 	/** A grid of empty slots to plan the layout before adding any images. */
 	function startEmpty(c = cols, r = rows) {
 		if (showingExamples) clearAll();
+		arrange = 'grid';
 		autoLayout = false;
 		cols = c;
 		rows = r;
@@ -1181,6 +1288,7 @@
 		}
 		const spans = randomSpans(next.length, ratio || 1, frame ? frame.w / frame.h : 1);
 		next.forEach((img, i) => (img.span = spans[i]));
+		arrange = 'grid';
 		autoLayout = true;
 		images = next;
 	}
@@ -1303,6 +1411,44 @@
 		}
 	}
 
+	// Resizing in Rows and Columns: dragging a gap trades space between its two neighbors.
+	let gapDrag = $state<{ path: number[]; j: number } | null>(null);
+	function startGapDrag(e: PointerEvent, g: SplitGap) {
+		if (e.button !== 0 || !tree) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const base = tree;
+		const start = g.axis === 'v' ? e.clientX : e.clientY;
+		const scale = k;
+		const min = Math.min(g.lens[g.j], g.lens[g.j + 1], Math.max(24, (g.lens[g.j] + g.lens[g.j + 1]) * 0.08));
+		gapDrag = { path: g.path, j: g.j };
+		autoLayout = false;
+		split = base;
+		const move = (ev: PointerEvent) => {
+			let d = ((g.axis === 'v' ? ev.clientX : ev.clientY) - start) / scale;
+			d = Math.max(min - g.lens[g.j], Math.min(g.lens[g.j + 1] - min, d));
+			const w = [...g.lens];
+			w[g.j] += d;
+			w[g.j + 1] -= d;
+			split = setWeights(base, g.path, w);
+		};
+		const up = () => {
+			gapDrag = null;
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+		window.addEventListener('pointercancel', up);
+	}
+	/** Double-clicking a gap evens out the sizes on both sides of it again. */
+	function evenGap(g: SplitGap) {
+		if (!tree) return;
+		autoLayout = false;
+		split = updateAt(tree, g.path, (n) => (n.t === 'leaf' ? n : { ...n, kids: n.kids.map((c) => ({ ...c, w: undefined })) }));
+	}
+
 	// Reordering thumbnails
 	let dragId = $state<string | null>(null);
 	/** Where a dragged thumbnail would go: before the image at this index (length means last). */
@@ -1313,11 +1459,13 @@
 	 * `swap` that it trades places with that cell's image (pointer over the cell's middle).
 	 */
 	type Hit = { target: number; after: boolean; swap: boolean };
-	let lift = $state<({ from: number; x: number; y: number } & Partial<Hit>) | null>(null);
+	/** In Rows and Columns: beside an image (on one of its edges), or into a new row or column. */
+	type SplitDrop = { side: Side; target: number; bar: Rect } | { line: number; bar: Rect };
+	let lift = $state<({ from: number; x: number; y: number; drop?: SplitDrop } & Partial<Hit>) | null>(null);
 	let previewEl = $state<HTMLDivElement>();
 	/** The insertion line beside the target cell, centred in the gap, in preview pixels. */
 	const liftLine = $derived.by(() => {
-		if (!lift || lift.target === undefined || lift.swap) return null;
+		if (!lift || lift.target === undefined || lift.swap || tree) return null;
 		const c = displayCells[lift.target];
 		if (!c) return null;
 		const g = (gap * k) / 2;
@@ -1343,12 +1491,56 @@
 		}
 		return best;
 	}
+	/**
+	 * Where an image dragged in Rows or Columns would land: the middle of another image swaps them,
+	 * its edges put it beside, above or below, and the space between rows (or columns) starts a new one.
+	 */
+	function splitHit(px: number, py: number, from: number): (Partial<Hit> & { drop?: SplitDrop }) | null {
+		const zone = 0.28;
+		for (let i = 0; i < displayCells.length; i++) {
+			const c = displayCells[i];
+			if (i === from || px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h) continue;
+			const fx = (px - c.x) / c.w;
+			const fy = (py - c.y) / c.h;
+			if (fx > zone && fx < 1 - zone && fy > zone && fy < 1 - zone) return { target: i, swap: true, after: false };
+			const d: Record<Side, number> = { left: fx, right: 1 - fx, top: fy, bottom: 1 - fy };
+			const side = (Object.keys(d) as Side[]).reduce((a, b) => (d[b] < d[a] ? b : a));
+			const t = 4;
+			const bar =
+				side === 'left'
+					? { x: c.x - t / 2, y: c.y, w: t, h: c.h }
+					: side === 'right'
+						? { x: c.x + c.w - t / 2, y: c.y, w: t, h: c.h }
+						: side === 'top'
+							? { x: c.x, y: c.y - t / 2, w: c.w, h: t }
+							: { x: c.x, y: c.y + c.h - t / 2, w: c.w, h: t };
+			return { target: i, swap: false, drop: { side, target: i, bar } };
+		}
+		// Between two rows (or columns) of the whole layout, or past the first or last one.
+		if (!tree || tree.t === 'leaf') return null;
+		const across = tree.t === 'col';
+		const lines = splitGaps.filter((g) => !g.path.length).map((g) => (across ? g.rect.y + g.rect.h / 2 : g.rect.x + g.rect.w / 2) * k);
+		const cs = displayCells;
+		const start = Math.min(...cs.map((c) => (across ? c.y : c.x)));
+		const end = Math.max(...cs.map((c) => (across ? c.y + c.h : c.x + c.w)));
+		const stops = [start - (gap * k) / 2, ...lines, end + (gap * k) / 2];
+		const at = across ? py : px;
+		const reach = Math.max(8, gap * k);
+		const j = stops.findIndex((v) => Math.abs(at - v) <= reach);
+		if (j < 0) return null;
+		const lo = Math.min(...cs.map((c) => (across ? c.x : c.y)));
+		const hi = Math.max(...cs.map((c) => (across ? c.x + c.w : c.y + c.h)));
+		const bar = across ? { x: lo, y: stops[j] - 2, w: hi - lo, h: 4 } : { x: stops[j] - 2, y: lo, w: 4, h: hi - lo };
+		return { drop: { line: j, bar } };
+	}
 	function startLift(e: PointerEvent, from: number) {
 		lift = { from, x: e.clientX, y: e.clientY };
 		const move = (ev: PointerEvent) => {
 			if (!lift || !previewEl) return;
 			const box = previewEl.getBoundingClientRect();
-			const hit = nearestCell(ev.clientX - box.left, ev.clientY - box.top);
+			const px = ev.clientX - box.left;
+			const py = ev.clientY - box.top;
+			const hit = tree ? splitHit(px, py, lift.from) : nearestCell(px, py);
 			lift = { from: lift.from, x: ev.clientX, y: ev.clientY, ...hit };
 			if (lift.swap && lift.target === lift.from) lift.swap = false;
 		};
@@ -1358,8 +1550,23 @@
 			window.removeEventListener('pointercancel', cancel);
 			const l = lift;
 			lift = null;
+			if (l?.drop && tree) {
+				const id = images[l.from].id;
+				const next = 'side' in l.drop ? moveBeside(tree, id, images[l.drop.target].id, l.drop.side) : moveToNewLine(tree, id, l.drop.line);
+				const order = leafIds(next);
+				const byId = new Map(images.map((i) => [i.id, i]));
+				images = order.map((i) => byId.get(i)!).filter(Boolean);
+				split = next;
+				autoLayout = false;
+				return;
+			}
 			if (!l || l.target === undefined) return;
 			if (l.swap) {
+				// In Rows and Columns the arrangement stays put and the two photos trade frames.
+				if (tree) {
+					split = tree;
+					autoLayout = false;
+				}
 				// The two images trade places; each slot keeps its size.
 				const next = [...images];
 				const a = next[l.from];
@@ -1930,17 +2137,19 @@
 								</Tooltip.Root>
 							{/if}
 						</h2>
-						<Tooltip.Root>
-							<Tooltip.Trigger>
-								{#snippet child({ props })}
-									<Button {...props} variant="ghost" size="sm" class="ml-auto h-7 px-2" onclick={randomBento} disabled={images.length < 2} data-testid="random-bento">
-										<DicesIcon />
-										Random
-									</Button>
-								{/snippet}
-							</Tooltip.Trigger>
-							<Tooltip.Content>Shuffle the images and make a few of them larger</Tooltip.Content>
-						</Tooltip.Root>
+						{#if !masonry}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									{#snippet child({ props })}
+										<Button {...props} variant="ghost" size="sm" class="ml-auto h-7 px-2" onclick={randomBento} disabled={images.length < 2} data-testid="random-bento">
+											<DicesIcon />
+											Random
+										</Button>
+									{/snippet}
+								</Tooltip.Trigger>
+								<Tooltip.Content>Shuffle the images and make a few of them larger</Tooltip.Content>
+							</Tooltip.Root>
+						{/if}
 						<label class="ml-2 flex cursor-pointer items-center gap-2 text-sm" for="auto-layout">
 							<span class="flex items-center gap-1.5">
 								Auto
@@ -1949,17 +2158,127 @@
 							<Switch id="auto-layout" size="sm" bind:checked={autoLayout} data-testid="auto-layout" />
 						</label>
 					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-sm" class:text-muted-foreground={autoLayout}>Columns</span>
-						<Stepper bind:value={colsBinding.get, colsBinding.set} label="Columns" />
-					</div>
-					<div class="flex items-center justify-between">
-						<span class="flex items-center gap-1.5 text-sm" class:text-muted-foreground={autoLayout}>
-							Rows
-							<InfoTip text="Rows without images are left out. A partly filled last row is centered. Hover an image to make it span more cells." />
-						</span>
-						<Stepper bind:value={rowsBinding.get, rowsBinding.set} label="Rows" />
-					</div>
+					<ToggleGroup.Root
+						type="single"
+						variant="outline"
+						size="sm"
+						class="w-full"
+						value={arrange}
+						onValueChange={(v) => {
+							if (!v) return;
+							arrange = v as Arrange;
+							split = null;
+						}}
+						data-testid="arrange"
+					>
+						<ToggleGroup.Item value="grid" class="flex-1" data-testid="arrange-grid">Grid</ToggleGroup.Item>
+						<ToggleGroup.Item value="rows" class="flex-1" data-testid="arrange-rows">Rows</ToggleGroup.Item>
+						<ToggleGroup.Item value="columns" class="flex-1" data-testid="arrange-columns">Columns</ToggleGroup.Item>
+					</ToggleGroup.Root>
+					{#if arrange !== 'grid'}
+						<p class="text-muted-foreground text-xs" data-testid="arrange-hint">
+							{arrange === 'rows'
+								? 'Each photo keeps its shape, and every row fills the width.'
+								: 'Each photo keeps its shape, stacked into the shortest column.'}
+							Drag a photo by its grip onto another photo’s edge to move it there, or drag a gap to resize.
+						</p>
+					{/if}
+					{#if masonry && split}
+						<div class="flex items-center justify-between gap-2" data-testid="split-custom">
+							<span class="text-sm">Customized</span>
+							<div class="flex items-center gap-1">
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										{#snippet child({ props })}
+											<Button {...props} variant="ghost" size="sm" class="h-7 px-2" onclick={() => tree && (split = rebalance(tree))} data-testid="split-fit">Fit to photos</Button>
+										{/snippet}
+									</Tooltip.Trigger>
+									<Tooltip.Content>Keep this arrangement and even out the sizes so each photo is cropped as little as possible</Tooltip.Content>
+								</Tooltip.Root>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										{#snippet child({ props })}
+											<Button
+												{...props}
+												variant="ghost"
+												size="sm"
+												class="h-7 px-2"
+												onclick={() => {
+													split = null;
+													autoLayout = true;
+												}}
+												data-testid="split-reflow">Re-flow</Button
+											>
+										{/snippet}
+									</Tooltip.Trigger>
+									<Tooltip.Content>Let Auto arrange the photos again</Tooltip.Content>
+								</Tooltip.Root>
+							</div>
+						</div>
+					{/if}
+					{#if arrange !== 'rows'}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm" class:text-muted-foreground={autoLayout}>
+								Columns
+								{#if arrange === 'columns'}
+									<InfoTip text="Auto picks the number of columns that suits the canvas with the least cropping." />
+								{/if}
+							</span>
+							<Stepper bind:value={colsBinding.get, colsBinding.set} label="Columns" />
+						</div>
+					{/if}
+					{#if arrange !== 'columns'}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm" class:text-muted-foreground={autoLayout}>
+								Rows
+								<InfoTip
+									text={arrange === 'rows'
+										? 'Images stay in order and are split into rows of about the same height. Auto picks the number of rows that suits the canvas.'
+										: 'Rows without images are left out. A partly filled last row is centered. Hover an image to make it span more cells.'}
+								/>
+							</span>
+							<Stepper bind:value={rowsBinding.get, rowsBinding.set} label="Rows" />
+						</div>
+					{/if}
+					{#if arrange === 'columns' && !split && !(frame && frameFill === 'trim')}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm">
+								Bottom edge
+								<InfoTip text="Even crops a little from photos in short and long columns so the bottoms line up. Ragged keeps every photo whole." />
+							</span>
+							<ToggleGroup.Root
+								type="single"
+								variant="outline"
+								size="sm"
+								value={evenBottoms ? 'even' : 'ragged'}
+								onValueChange={(v) => v && (evenBottoms = v === 'even')}
+								data-testid="bottom-edge"
+							>
+								<ToggleGroup.Item value="even" class="px-3">Even</ToggleGroup.Item>
+								<ToggleGroup.Item value="ragged" class="px-3">Ragged</ToggleGroup.Item>
+							</ToggleGroup.Root>
+						</div>
+					{/if}
+					{#if masonry && frame}
+						<div class="flex items-center justify-between">
+							<span class="flex items-center gap-1.5 text-sm">
+								Fixed size
+								<InfoTip text="Photos rarely add up to a fixed size exactly. Trim crops them a little more to fill it. Fit keeps their shapes and leaves a margin." />
+							</span>
+							<ToggleGroup.Root
+								type="single"
+								variant="outline"
+								size="sm"
+								value={frameFill}
+								onValueChange={(v) => v && (frameFill = v as FrameFill)}
+								data-testid="frame-fill"
+							>
+								<ToggleGroup.Item value="trim" class="px-3">Trim</ToggleGroup.Item>
+								<ToggleGroup.Item value="fit" class="px-3">Fit</ToggleGroup.Item>
+							</ToggleGroup.Root>
+						</div>
+					{/if}
+					{#if !masonry}
 					<div class="flex items-center justify-between">
 						<span class="text-sm">Cell shape</span>
 						<Select.Root type="single" bind:value={aspect}>
@@ -1980,6 +2299,7 @@
 								<NumberInput bind:value={customAspect.h} min={1} max={999} unit="" label="Cell height ratio" />
 							</div>
 						</div>
+					{/if}
 					{/if}
 					<div class="flex items-center justify-between">
 						<span class="flex items-center gap-1.5 text-sm">
@@ -2294,6 +2614,7 @@
 										onfiles={(files) => replaceAt(i, files)}
 										cols={layout.cols}
 										rows={Math.max(layout.rows, grid.rows)}
+										spannable={!masonry}
 										captions={style.captions}
 										onreorder={images.length > 1 ? (e) => startLift(e, i) : undefined}
 										lifted={lift?.from === i}
@@ -2325,6 +2646,38 @@
 									style:height="{liftLine.h}px"
 									data-testid="grid-insert-line"
 								></div>
+							{/if}
+							{#if lift?.drop}
+								<div
+									class="bg-primary ring-background pointer-events-none absolute z-20 ring-2"
+									style:left="{lift.drop.bar.x}px"
+									style:top="{lift.drop.bar.y}px"
+									style:width="{lift.drop.bar.w}px"
+									style:height="{lift.drop.bar.h}px"
+									data-testid="split-drop"
+								></div>
+							{/if}
+							{#if !lift && !spaceHeld}
+								{#each splitGaps as g (g.path.join('.') + ':' + g.j)}
+									{@const t = Math.max(10, g.rect[g.axis === 'v' ? 'w' : 'h'] * k)}
+									{@const active = gapDrag && gapDrag.j === g.j && gapDrag.path.join('.') === g.path.join('.')}
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										class="group/gap absolute z-10 flex items-center justify-center {g.axis === 'v' ? 'cursor-col-resize' : 'cursor-row-resize'}"
+										style:left="{g.axis === 'v' ? (g.rect.x + g.rect.w / 2) * k - t / 2 : g.rect.x * k}px"
+										style:top="{g.axis === 'h' ? (g.rect.y + g.rect.h / 2) * k - t / 2 : g.rect.y * k}px"
+										style:width="{g.axis === 'v' ? t : g.rect.w * k}px"
+										style:height="{g.axis === 'h' ? t : g.rect.h * k}px"
+										title="Drag to resize. Double-click to even out."
+										onpointerdown={(e) => startGapDrag(e, g)}
+										ondblclick={() => evenGap(g)}
+										data-testid="split-gap"
+									>
+										<span
+											class="bg-primary rounded-full opacity-0 transition-opacity group-hover/gap:opacity-100 {active ? 'opacity-100' : ''} {g.axis === 'v' ? 'h-8 max-h-[60%] w-1' : 'h-1 w-8 max-w-[60%]'}"
+										></span>
+									</div>
+								{/each}
 							{/if}
 						</div>
 						</div>
